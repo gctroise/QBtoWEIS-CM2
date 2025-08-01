@@ -58,6 +58,7 @@ import weis.aeroelasticse.QBlade_wrapper as qbwrap
 import random
 import base64
 
+from scipy.special import gamma
 
 _encoded_version = 'MS4xLjBfYmV0YQ=='
 __version__ = base64.b64decode(_encoded_version).decode('utf-8')
@@ -98,6 +99,12 @@ class QBLADELoadCases(ExplicitComponent):
         self.add_discrete_input('turbulence_class', val='A', desc='IEC turbulence class')
         self.add_discrete_input('turbine_class',    val='I', desc='IEC turbine class')
         self.add_input('shearExp',    val=0.0,                   desc='shear exponent')
+
+        #va gt
+        if self.options['modeling_options']['Floris']['flag']:
+            self.add_input('site_weibull_Vmean', val=0.0, desc='site average wind speed')
+            self.add_input('site_weibull_shape_factor', val=0.0, desc='site weibull shape factor')
+        #va gt
 
         if not self.options['modeling_options']['QBlade']['from_qblade']:
 
@@ -1976,7 +1983,17 @@ class QBLADELoadCases(ExplicitComponent):
                     U.append(dlc_generator.cases[i_case].URef)
 
             if len(U) > 0:
-                self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
+                #va gt
+                # self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
+                #va gt
+                
+                #va gt
+                if not self.options['modeling_options']['Floris']['flag']:
+                    self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
+                else: 
+                    self.cruncher.set_probability_wind_distribution(U, inputs['site_weibull_Vmean'][0], weibull_k=inputs['site_weibull_shape_factor'][0], idx=idx_pwrcrv)
+                    print('! estimating power production using site wind charactristics !')
+                #va gt
 
             if len(idx_pwrcrv) > 0:
                 sum_stats = sum_stats.iloc[idx_pwrcrv]
@@ -1988,11 +2005,19 @@ class QBLADELoadCases(ExplicitComponent):
                 logger.warning('WARNING: QBlade is not run using DLC AEP, 1.1, or 1.2. AEP cannot be estimated well. Using average power instead.')
 
             if not self.qb_vt['Turbine']['NOSTRUCTURE']:
+                # va gt
+                # AEP, _ = self.cruncher.compute_aep("Gen. Elec. Power", idx=idx_pwrcrv)
                 AEP, _ = self.cruncher.compute_aep("Gen. Elec. Power", idx=idx_pwrcrv)
+                AEP = AEP/3600 # convert to kWh
+                # va gt
                 outputs['Cp_out']       = np.sum(prob * sum_stats['Aero. Power Coefficient']['mean'])
                 outputs['AEP'] = AEP
             else:
+                # va gt
+                # AEP, _ = self.cruncher.compute_aep("Aerodynamic Power", idx=idx_pwrcrv)
                 AEP, _ = self.cruncher.compute_aep("Aerodynamic Power", idx=idx_pwrcrv)
+                AEP = AEP/3600 # convert to kWh
+                # va gt
                 outputs['Cp_out']       = np.sum(prob * sum_stats['Power Coefficient']['mean'])
                 
             outputs['AEP'] = AEP

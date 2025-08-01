@@ -337,6 +337,48 @@ properties:
                                         lower_bound: *bound
                                         upper_bound: *bound
                                         initial: *initial
+                #va gt
+            layout:
+                type: object
+                description: Design variables associated with layout
+                default: {}
+                properties:
+                    flag: *flag
+                    x_spacing:
+                        type: object
+                        default: {}
+                        upper_bound:
+                            type: number
+                            maximum: 10.0
+                            default: 5.0
+                            description: Spacing along x-direction upper bound
+                    y_spacing:
+                        type: object
+                        default: {}
+                        upper_bound:
+                            type: number
+                            maximum: 10.0
+                            default: 7.0
+                            description: Spacing along y-direction upper bound
+                    farm_alignment_angle:
+                        type: object
+                        default: {}
+                        lower_bound:
+                            type: number
+                            minimum: -180.0
+                            maximum: 180.0
+                            default: 0.0
+                            unit: deg
+                            description: Alignment angle of the farm lower bound
+                        upper_bound:
+                            type: number
+                            minimum: -180.0
+                            maximum: 180.0
+                            default: 0.0
+                            unit: deg # check this information
+                            description: Alignment angle of the farm upper bound
+            #va gt
+    
     constraints:
         # GB: These all need gammas or safety factors
         type: object
