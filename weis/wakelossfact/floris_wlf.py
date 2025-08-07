@@ -86,6 +86,7 @@ class wakelossfactor(om.ExplicitComponent):
 
         self.add_output('wake_loss_factor', val=0.15)
 
+        
         if self.options['modeling_options']['QBlade']['flag'] or self.options['modeling_options']['OpenFAST']['flag']:
             # n_ws = self.options['modeling_options']['DLC_driver']['n_cases']
             n_ws = self.options['modeling_options']['DLC_driver']['n_ws_aep']
@@ -96,8 +97,8 @@ class wakelossfactor(om.ExplicitComponent):
         self.add_input('Cp_out',  val=np.zeros(n_ws),                   desc='rotor aero power coefficient')
         self.add_input('Ct_out',  val=np.zeros(n_ws),                   desc='rotor aero thrust coefficient')
 
-        # self.add_input('tilt_vals', val=np.zeros(self.options['modeling_options']['DLC_driver']['n_cases']), units='deg',      desc='tilt values for wake loss calculation')
-        self.add_input('tilt_vals', val=np.zeros(n_ws), units='deg',      desc='tilt values for wake loss calculation')
+        self.add_input('tilt_vals', val=np.zeros(self.options['modeling_options']['DLC_driver']['n_cases']), units='deg',      desc='tilt values for wake loss calculation')
+        # self.add_input('tilt_vals', val=np.zeros(n_ws), units='deg',      desc='tilt values for wake loss calculation')
         # self.add_input('vel_tilt', val=np.zeros(n_ws), units='m/s',      desc='velocity values for tilt correction in wake loss calculation')
         
         self.add_input('farm_alignment_angle', val=0.0)

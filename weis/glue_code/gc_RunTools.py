@@ -50,11 +50,12 @@ class Outputs_2_Screen(om.ExplicitComponent):
 
     def compute(self, inputs, outputs):
         #va gt
-        print('########################################')
-        print('Financial parameters')
-        print('Fixed charge rate: {:<8.10f}   '.format(inputs['fixed_charge_rate'][0]))
-        print('Capital recovery factor: {:<8.10f}   '.format(inputs['capital_recovery_factor'][0]))
-        print('WACC: {:<8.10f}   '.format(inputs['wacc'][0]))
+        if self.options['modeling_options']['FCR']['flag']:
+            print('########################################')
+            print('Financial parameters')
+            print('Fixed charge rate: {:<8.10f}   '.format(inputs['fixed_charge_rate'][0]))
+            print('Capital recovery factor: {:<8.10f}   '.format(inputs['capital_recovery_factor'][0]))
+            print('WACC: {:<8.10f}   '.format(inputs['wacc'][0]))
         #va gt
         print('########################################')
         print('Objectives')
