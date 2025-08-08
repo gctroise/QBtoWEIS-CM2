@@ -169,9 +169,12 @@ if __name__=='__main__':
     # fname_wt_input='../../qb_examples/02_iea15mw/IEA-15-240-RWT_VolturnUS-S.yaml'
     # fname_modeling_options='../../qb_examples/02_iea15mw/analysis_options_noopt.yaml'
     # fname_opt_options='../../qb_examples/02_iea15mw/modeling_options_dlc11.yaml'
-    fname_wt_input='qb_examples/02_iea15mw/IEA-15-240-RWT_VolturnUS-S.yaml'
-    fname_modeling_options='qb_examples/02_iea15mw/analysis_options_opt.yaml'
-    fname_opt_options='qb_examples/02_iea15mw/modeling_options.yaml'
+    # fname_wt_input='qb_examples/02_iea15mw/IEA-15-240-RWT_VolturnUS-S.yaml'
+    fname_wt_input='../../qb_examples/MED_v20-4_SEAPOWER/MED15-308_v20.4.0_IEA22MWsemi.yaml'
+    # fname_modeling_options='qb_examples/MED_v20-4_SEAPOWER/analysis_options_opt.yaml'
+    fname_modeling_options='../../qb_examples/MED_v20-4_SEAPOWER/analysis_options_raft_opt_lcoe.yaml'
+    # fname_opt_options='qb_examples/02_iea15mw/modeling_options.yaml'
+    fname_opt_options='../../qb_examples/MED_v20-4_SEAPOWER/modeling_options.yaml'
     
     from wisdem.glue_code.glue_code import WindPark as wisdemPark
     from weis.glue_code.gc_LoadInputs import WindTurbineOntologyPythonWEIS
@@ -183,8 +186,10 @@ if __name__=='__main__':
         )
     wt_init, modeling_options, opt_options = wt_initial.get_input_data()
 
-    modeling_options["Floris"]["floris_config_file"]=os.path.abspath('/home/gt/qbweis-CM/weis/wakelossfact/emgauss_floating_model.yaml')
-    modeling_options["Floris"]["floris_wind_data_file"]='weis/wakelossfact/wind_data.txt'
+    # modeling_options["Floris"]["floris_config_file"]=os.path.abspath('/home/gt/qbweis-CM/weis/wakelossfact/emgauss_floating_model.yaml')
+    modeling_options["Floris"]["floris_config_file"]=os.path.abspath('emgauss_floating_model.yaml')
+    # modeling_options["Floris"]["floris_wind_data_file"]='weis/wakelossfact/wind_data.txt'
+    modeling_options["Floris"]["floris_wind_data_file"]='wind_data.txt'
     modeling_options['WISDEM']['RotorSE']['n_pc']=12
     # modeling_options["floris_input"]='../floris/examples/mytests/emgauss_floating_IEA15MW.yaml'
     # modeling_options["wind_data_file"]='../floris/examples/mytests/wind_data_test.txt'
