@@ -33,6 +33,16 @@ except ImportError:
     SONATA_WEIS = None
     print("Warning: SONATA_WEIS module is not installed. SONATA analysis will not be available.")
 
+# va gt
+from weis.myopex.my_opex import myopex
+from weis.wakelossfact.floris_wlf import wakelossfactor as wlf
+from weis.wakelossfact.wlf_calculation import estimate_weibull
+
+#fcr
+from weis.economic.fcr_calculation import fcr
+#fcr
+# va gt
+
 
 weis_dir = os.path.realpath(os.path.join(os.path.dirname(__file__),'../../'))
 
@@ -99,6 +109,13 @@ class WindPark(om.Group):
 
         # Analysis components
         self.add_subsystem('wisdem',   wisdemPark(modeling_options = modeling_options, opt_options = opt_options), promotes=['*'])
+
+        #va gt
+        #fcr
+        if modeling_options["FCR"]["flag"]:
+            self.add_subsystem('fcr',fcr(modeling_options = modeling_options, wt_init = wt_init))
+        #fcr
+        #va gt
 
         # XFOIL
         self.add_subsystem('xf',        RunXFOIL(modeling_options = modeling_options, opt_options = opt_options)) # Recompute polars with xfoil (for flaps)
@@ -348,6 +365,55 @@ class WindPark(om.Group):
                             'transverse_added_mass','tangential_added_mass','transverse_drag','tangential_drag']:
                     self.connect(f'mooring.line_{var}', f'raft.line_{var}')
 
+            # va gt  
+            if not modeling_options['OpenFAST']['flag'] and not modeling_options['QBlade']['flag']:
+                if modeling_options["flags"]["bos"]:
+                    if modeling_options['flags']['offshore']:
+                        if modeling_options["Floris"]["flag"]:
+                            self.add_subsystem("wlf", wlf(modeling_options=modeling_options))
+                        if modeling_options["OPEX"]["flag"]:
+                            self.add_subsystem("myopex_post",myopex(wt_init=wt_init))
+
+                        if modeling_options["OPEX"]["flag"] or modeling_options["Floris"]["flag"]:
+                            self.add_subsystem('financese_post', PlantFinance(verbosity=modeling_options['General']['verbosity']))     
+                            self.add_subsystem('outputs_2_screen_weis',  Outputs_2_Screen(modeling_options = modeling_options, opt_options = opt_options))
+                            self.connect('rotorse.rp.AEP', 'financese_post.turbine_aep')
+                            self.connect('tcc.turbine_cost_kW',     'financese_post.tcc_per_kW')
+                            self.connect('orbit.total_capex_kW',    'financese_post.bos_per_kW')
+
+                            if modeling_options["Floris"]["flag"]:
+                                self.connect('wlf.wake_loss_factor',  'financese_post.wake_loss_factor')
+                                self.connect('wlf.site_weibull_Vmean','rotorse.wt_class.V_mean_overwrite')
+                                # self.connect('wlf.site_weibull_shape_factor','rotorse.rp.cdf.k')
+
+                            else:
+                                self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
+                                
+                            if modeling_options["OPEX"]["flag"]:
+                                self.connect("myopex_post.opex_cost_kW", "financese_post.opex_per_kW")
+                            else:
+                                self.connect("costs.opex_per_kW", "financese_post.opex_per_kW")
+                            
+                            self.connect('configuration.rated_power',     'financese_post.machine_rating')
+                            self.connect('costs.turbine_number',    'financese_post.turbine_number')
+                            self.connect('costs.offset_tcc_per_kW', 'financese_post.offset_tcc_per_kW')
+                        # fcr    
+                            if modeling_options["FCR"]["flag"]:
+                                # self.connect('costs.fixed_charge_rate', 'fcr.fixed_charge_rate')
+                                self.connect('configuration.lifetime','fcr.project_duration')
+                                self.connect('fcr.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                                self.connect('fcr.fixed_charge_rate', 'outputs_2_screen_weis.fixed_charge_rate')
+                                self.connect('fcr.wacc','outputs_2_screen_weis.wacc')
+                                self.connect('fcr.capital_recovery_factor','outputs_2_screen_weis.capital_recovery_factor')
+                            else:
+                                self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                        # fcr
+                            self.connect('rotorse.rp.AEP',     'outputs_2_screen_weis.aep')
+                            self.connect('rotorse.blade_mass',  'outputs_2_screen_weis.blade_mass')
+                            self.connect('financese_post.lcoe',  'outputs_2_screen_weis.lcoe')
+                            self.connect('rotorse.rs.tip_pos.tip_deflection',  'outputs_2_screen_weis.tip_deflection')
+            # va gt
+
         # TMD connections to openmdao_openfast
         if modeling_options['flags']['TMDs']:
             self.add_subsystem('TMDs',  TMD_group(modeling_options = modeling_options, opt_options = opt_options))
@@ -397,6 +463,12 @@ class WindPark(om.Group):
                 
             if not modeling_options['OpenFAST']['from_openfast']:
                 self.add_subsystem('tcons_post',     TurbineConstraints(modeling_options = modeling_options))
+                # va gt
+                if modeling_options["Floris"]["flag"]:
+                    self.add_subsystem("wlf", wlf(modeling_options=modeling_options))
+                if modeling_options["OPEX"]["flag"]:
+                    self.add_subsystem("myopex_post",myopex(wt_init=wt_init))
+                # va gt
                 self.add_subsystem('financese_post', PlantFinance(verbosity=modeling_options['General']['verbosity']))
             
             # Post-processing
@@ -904,6 +976,14 @@ class WindPark(om.Group):
                 if modeling_options["flags"]["bos"]:
                     if modeling_options['flags']['offshore']:
                         self.connect('orbit.total_capex_kW',    'financese_post.bos_per_kW')
+                        # va gt
+                        if modeling_options["OPEX"]["flag"]:
+                            # if not modeling_options["Level4"]["flag"]:
+                            if modeling_options["OpenFAST"]["flag"]:
+                                self.connect("myopex_post.opex_cost_kW", "financese_post.opex_per_kW")
+                            else:
+                                self.connect("costs.opex_per_kW", "financese_post.opex_per_kW")
+                        # va gt
                     else:
                         self.connect('landbosse.bos_capex_kW',  'financese_post.bos_per_kW')
                 else:
@@ -915,10 +995,33 @@ class WindPark(om.Group):
 
             if not modeling_options['OpenFAST']['from_openfast']:    
                 self.connect('costs.turbine_number',    'financese_post.turbine_number')
-                self.connect('costs.opex_per_kW',       'financese_post.opex_per_kW')
+                # va gt
+                # self.connect('costs.opex_per_kW',       'financese_post.opex_per_kW')
+                # va gt
                 self.connect('costs.offset_tcc_per_kW', 'financese_post.offset_tcc_per_kW')
-                self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
-                self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+
+                #va gt
+                # self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
+                if modeling_options["Floris"]["flag"]:
+                    self.connect('wlf.wake_loss_factor',  'financese_post.wake_loss_factor')
+                else:
+                    self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
+                # va gt
+                # va gt
+                # self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                # fcr
+                if modeling_options["FCR"]["flag"]:
+                    # self.connect('costs.fixed_charge_rate', 'fcr.fixed_charge_rate')
+                    self.connect('configuration.lifetime','fcr.project_duration')
+                    self.connect('fcr.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                    self.connect('fcr.fixed_charge_rate', 'outputs_2_screen_weis.fixed_charge_rate')
+                    self.connect('fcr.wacc','outputs_2_screen_weis.wacc')
+                    self.connect('fcr.capital_recovery_factor','outputs_2_screen_weis.capital_recovery_factor')
+                else:
+                    self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                # fcr
+                # va gt
+
 
             if modeling_options['DLC_driver']['n_ws_aep'] > 0:
                 self.connect('aeroelastic.AEP',     'outputs_2_screen_weis.aep')
@@ -984,6 +1087,12 @@ class WindPark(om.Group):
 
             if not modeling_options['QBlade']['from_qblade']:
                 self.add_subsystem('tcons_post',     TurbineConstraints(modeling_options = modeling_options))
+                #va gt
+                if modeling_options["Floris"]["flag"]:
+                    self.add_subsystem("wlf", wlf(modeling_options=modeling_options))
+                if modeling_options["OPEX"]["flag"]:
+                    self.add_subsystem("myopex_post",myopex(wt_init=wt_init))
+                #va gt
                 self.add_subsystem('financese_post', PlantFinance(verbosity=modeling_options['General']['verbosity']))
 
             # Post-processing
@@ -1284,6 +1393,12 @@ class WindPark(om.Group):
                 if modeling_options["flags"]["bos"]:
                     if modeling_options['flags']['offshore']:
                         self.connect('orbit.total_capex_kW',    'financese_post.bos_per_kW')
+                        # va gt
+                        if modeling_options["OPEX"]["flag"]:
+                            self.connect("myopex_post.opex_cost_kW", "financese_post.opex_per_kW")
+                        else:
+                            self.connect("costs.opex_per_kW", "financese_post.opex_per_kW")
+                        # va gt
                     else:
                         self.connect('landbosse.bos_capex_kW',  'financese_post.bos_per_kW')
                 else:
@@ -1298,10 +1413,31 @@ class WindPark(om.Group):
 
             if not modeling_options['QBlade']['from_qblade']:  
                 self.connect('costs.turbine_number',    'financese_post.turbine_number')
-                self.connect('costs.opex_per_kW',       'financese_post.opex_per_kW')
+                # va gt
+                # self.connect('costs.opex_per_kW',       'financese_post.opex_per_kW')                 
+                # va gt
                 self.connect('costs.offset_tcc_per_kW', 'financese_post.offset_tcc_per_kW')
-                self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
-                self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                #va gt
+                if modeling_options["Floris"]["flag"]:
+                    self.connect('wlf.wake_loss_factor',  'financese_post.wake_loss_factor')
+                    self.connect('wlf.site_weibull_Vmean','aeroelastic_qblade.site_weibull_Vmean')
+                    self.connect('wlf.site_weibull_shape_factor','aeroelastic_qblade.site_weibull_shape_factor')
+                else:
+                    self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
+                #fcr
+                if modeling_options["FCR"]["flag"]:
+                    # self.connect('costs.fixed_charge_rate', 'fcr.fixed_charge_rate')
+                    self.connect('configuration.lifetime','fcr.project_duration')
+                    self.connect('fcr.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                    self.connect('fcr.fixed_charge_rate', 'outputs_2_screen_weis.fixed_charge_rate')
+                    self.connect('fcr.wacc','outputs_2_screen_weis.wacc')
+                    self.connect('fcr.capital_recovery_factor','outputs_2_screen_weis.capital_recovery_factor')
+                else:
+                    self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                #fcr
+                # self.connect('costs.wake_loss_factor',  'financese_post.wake_loss_factor')
+                # self.connect('costs.fixed_charge_rate', 'financese_post.fixed_charge_rate')
+                #va gt
                 self.connect('financese_post.lcoe',      'outputs_2_screen_weis.lcoe')
 
                 self.connect('rotorse.blade_mass',  'outputs_2_screen_weis.blade_mass')
@@ -1324,3 +1460,52 @@ class WindPark(om.Group):
                 self.connect('tune_rosco_ivc.IPC_Kp1p',        'outputs_2_screen_weis.IPC_Kp1p')
                 self.connect('tune_rosco_ivc.IPC_Ki1p',        'outputs_2_screen_weis.IPC_Ki1p')
                 self.connect('dac_ivc.te_flap_end',            'outputs_2_screen_weis.te_flap_end')
+        # va gt
+        # if modeling_options["WISDEM"]["OPEX"]["flag"]:
+        if modeling_options["OPEX"]["flag"]:
+            # self.add_subsystem("myopex_post",myopex(wt_init=wt_init))
+        # va gt Inputs into myopex
+            self.connect("configuration.rated_power", "myopex_post.rated_power")
+            self.connect("blade.high_level_blade_props.rotor_diameter", "myopex_post.rotor_diameter")
+            self.connect("bos.plant_turbine_spacing", "myopex_post.plant_turbine_spacing")
+            self.connect("bos.plant_row_spacing", "myopex_post.plant_row_spacing")
+            self.connect("costs.turbine_number", "myopex_post.turbine_number")
+            self.connect("bos.site_distance", "myopex_post.distance_to_shore")
+            if modeling_options["Floris"]["flag"]:
+                self.connect('wlf.wake_loss_factor',  'myopex_post.wake_loss_factor')
+            else:
+                self.connect("costs.wake_loss_factor", "myopex_post.wake_loss_factor")
+            if modeling_options['QBlade']['flag']:
+                self.connect("aeroelastic_qblade.AEP", "myopex_post.turbine_aep")
+            else:
+                self.connect("rotorse.rp.AEP", "myopex_post.turbine_aep")
+        
+        if modeling_options["Floris"]["flag"]:
+            # self.add_subsystem("wlf", wlf(modeling_options=modeling_options))
+
+            self.connect("blade.high_level_blade_props.rotor_diameter", "wlf.rotor_diameter")
+            self.connect("high_level_tower_props.hub_height", "wlf.hub_height")
+
+            if modeling_options["Floris"]["override_layout"]:
+                self.connect("costs.turbine_number", "wlf.turbine_number")
+                self.connect("bos.plant_turbine_spacing", "wlf.turbine_spacing")
+                self.connect("bos.plant_row_spacing", "wlf.row_spacing")
+
+            if modeling_options['QBlade']['flag']:
+                self.connect("aeroelastic_qblade.V_out","wlf.V_out")
+                self.connect("aeroelastic_qblade.P_out","wlf.P_out")
+                self.connect("aeroelastic_qblade.Cp_out","wlf.Cp_out")
+                self.connect("aeroelastic_qblade.Ct_out","wlf.Ct_out")
+            elif modeling_options['OpenFAST']['flag']:
+                self.connect("aeroelastic.V_out","wlf.V_out")
+                self.connect("aeroelastic.P_out","wlf.P_out")
+                self.connect("aeroelastic.Cp_out","wlf.Cp_out")
+                self.connect("aeroelastic.Ct_out","wlf.Ct_out")
+            elif modeling_options['RAFT']['flag']:
+                self.connect("rotorse.rp.powercurve.V","wlf.V_out")
+                self.connect("rotorse.rp.powercurve.P","wlf.P_out")
+                self.connect("rotorse.rp.powercurve.Cp_aero","wlf.Cp_out")
+                self.connect("rotorse.rp.powercurve.Ct_aero","wlf.Ct_out")
+
+                self.connect("raft.stats_pitch_avg", "wlf.tilt_vals")
+        #va gt 

@@ -41,7 +41,22 @@ class Outputs_2_Screen(om.ExplicitComponent):
         if modeling_options['OL2CL']['flag']:
             self.add_input('OL2CL_pitch',   val=0.0, units = 'deg')
 
+        #va gt
+        if modeling_options['FCR']['flag']:
+            self.add_input('wacc', val=0.0)
+            self.add_input('capital_recovery_factor', val=0.0)
+            self.add_input('fixed_charge_rate', val=0.0)
+        #va gt
+
     def compute(self, inputs, outputs):
+        #va gt
+        if self.options['modeling_options']['FCR']['flag']:
+            print('########################################')
+            print('Financial parameters')
+            print('Fixed charge rate: {:<8.10f}   '.format(inputs['fixed_charge_rate'][0]))
+            print('Capital recovery factor: {:<8.10f}   '.format(inputs['capital_recovery_factor'][0]))
+            print('WACC: {:<8.10f}   '.format(inputs['wacc'][0]))
+        #va gt
         print('########################################')
         print('Objectives')
         print('Turbine AEP: {:<8.10f} GWh'.format(inputs['aep'][0]))

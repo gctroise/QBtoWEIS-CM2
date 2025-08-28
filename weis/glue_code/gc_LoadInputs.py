@@ -248,7 +248,7 @@ class WindTurbineOntologyPythonWEIS(WindTurbineOntologyPython):
         # ROSCO
         self.modeling_options['ROSCO']['flag'] = (self.modeling_options['RAFT']['flag'] or
                                                   self.modeling_options['OpenFAST_Linear']['flag'] or
-                                                  self.modeling_options['OpenFAST']['flag']or
+                                                  self.modeling_options['OpenFAST']['flag'] or
                                                   self.modeling_options['QBlade']['flag'])
         
         if self.modeling_options['ROSCO']['tuning_yaml'] != 'none':  # default is empty

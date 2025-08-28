@@ -17,6 +17,11 @@ from weis.glue_code.mpi_tools import compute_optimal_nP
 if MPI:
     from weis.glue_code.mpi_tools import map_comm_heirarchical, subprocessor_loop, subprocessor_stop
 
+#va gt
+from weis.wakelossfact.wlf_calculation import estimate_weibull
+# from weis.wakelossfact.floris_wlf import wakelossfactor
+#va gt
+
 def run_weis(fname_wt_input, fname_modeling_options, fname_opt_options, 
              geometry_override=None, modeling_override=None, analysis_override=None, 
              prepMPI=False, maxnP=1):
@@ -29,6 +34,14 @@ def run_weis(fname_wt_input, fname_modeling_options, fname_opt_options,
         analysis_override=analysis_override
         )
     wt_init, modeling_options, opt_options = wt_initial.get_input_data()
+
+    # va gt
+    if modeling_options['Floris']['flag']:
+        wind_data_file=modeling_options['Floris']['floris_wind_data_file']
+        A_fit, k_fit, weibull_Vmean = estimate_weibull(wind_data_file)
+        wt_init['environment']['weib_shape_parameter']=k_fit
+        wt_init['environment']['V_mean']=weibull_Vmean
+    #va gt
 
     # Initialize openmdao problem. If running with multiple processors in MPI, use parallel finite differencing equal to the number of cores used.
     # Otherwise, initialize the WindPark system normally. Get the rank number for parallelization. We only print output files using the root processor.
