@@ -101,7 +101,7 @@ class QBLADELoadCases(ExplicitComponent):
         self.add_input('shearExp',    val=0.0,                   desc='shear exponent')
 
         #va gt
-        if self.options['modeling_options']['Floris']['flag']:
+        if self.options['modeling_options']['Floris']['flag'] or self.options["wt_init"]["environment"]["V_mean"]!=0:
             self.add_input('site_weibull_Vmean', val=0.0, desc='site average wind speed')
             self.add_input('site_weibull_shape_factor', val=0.0, desc='site weibull shape factor')
         #va gt
@@ -1991,7 +1991,7 @@ class QBLADELoadCases(ExplicitComponent):
                 #va gt
                 
                 #va gt
-                if not self.options['modeling_options']['Floris']['flag']:
+                if (not self.options['modeling_options']['Floris']['flag']) and self.options["wt_init"]["environment"]["V_mean"]==0:
                     self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
                 else: 
                     self.cruncher.set_probability_wind_distribution(U, inputs['site_weibull_Vmean'][0], weibull_k=inputs['site_weibull_shape_factor'][0], idx=idx_pwrcrv)
@@ -2013,7 +2013,10 @@ class QBLADELoadCases(ExplicitComponent):
                 AEP, _ = self.cruncher.compute_aep("Gen. Elec. Power", idx=idx_pwrcrv)
                 AEP = AEP/3600 # convert to kWh
                 # va gt
-                outputs['Cp_out']       = np.sum(prob * sum_stats['Aero. Power Coefficient']['mean'])
+                #va gt
+                # outputs['Cp_out']       = np.sum(prob * sum_stats['Aero. Power Coefficient']['mean'])
+                outputs['Cp_out']       = sum_stats['Aero. Power Coefficient']['mean']
+                #va gt
                 outputs['AEP'] = AEP
             else:
                 # va gt
@@ -2021,16 +2024,26 @@ class QBLADELoadCases(ExplicitComponent):
                 AEP, _ = self.cruncher.compute_aep("Aerodynamic Power", idx=idx_pwrcrv)
                 AEP = AEP/3600 # convert to kWh
                 # va gt
-                outputs['Cp_out']       = np.sum(prob * sum_stats['Power Coefficient']['mean'])
+                #va gt
+                # outputs['Cp_out']       = np.sum(prob * sum_stats['Power Coefficient']['mean'])
+                outputs['Cp_out']       = sum_stats['Power Coefficient']['mean']
+                #va gt
                 
             outputs['AEP'] = AEP
-            outputs['Ct_out']       = np.sum(prob * sum_stats['Thrust Coefficient']['mean'])
-            outputs['Omega_out']    = np.sum(prob * sum_stats['Rotational Speed']['mean'])
-            outputs['pitch_out']    = np.sum(prob * sum_stats['Pitch Angle Blade 1']['mean'])
+            #va gt
+            # outputs['Ct_out']       = np.sum(prob * sum_stats['Thrust Coefficient']['mean'])
+            # outputs['Omega_out']    = np.sum(prob * sum_stats['Rotational Speed']['mean'])
+            # outputs['pitch_out']    = np.sum(prob * sum_stats['Pitch Angle Blade 1']['mean'])
+            outputs['Ct_out']       = sum_stats['Thrust Coefficient']['mean']
+            outputs['Omega_out']    = sum_stats['Rotational Speed']['mean']
+            outputs['pitch_out']    = sum_stats['Pitch Angle Blade 1']['mean']
+            #va gt
+            #va gt
+            # if self.qb_vt['Turbine']['CONTROLLERTYPE'] > 0:
+                # outputs['P_out'] = np.sum(prob * sum_stats['Gen. Elec. Power']['mean']) * 1e3
+            outputs['P_out']        = sum_stats['Gen. Elec. Power']['mean'] * 1.e3
+            #va gt
 
-            if self.qb_vt['Turbine']['CONTROLLERTYPE'] > 0:
-                outputs['P_out'] = np.sum(prob * sum_stats['Gen. Elec. Power']['mean']) * 1e3
-        
         else: # for when we don't use the DLC generator 
             logger.warning('WARNING: QBlade is not run using the DLC generator AEP cannot be estimated. Using average power/Cp/Ct/rpm/pitch_angle instead.')
 
