@@ -423,7 +423,10 @@ class WindPark(om.Group):
             self.connect('TMDs.damping',            'aeroelastic.TMD_damping')
 
         if modeling_options['OpenFAST']['flag'] or modeling_options['OpenFAST_Linear']['flag']:
-            self.add_subsystem('aeroelastic',       FASTLoadCases(modeling_options = modeling_options, opt_options = opt_options))
+            # va gt                   
+            # self.add_subsystem('aeroelastic',       FASTLoadCases(modeling_options = modeling_options, opt_options = opt_options))
+            self.add_subsystem('aeroelastic',       FASTLoadCases(modeling_options = modeling_options, opt_options = opt_options, wt_init=wt_init))
+            # va gt                   
             self.add_subsystem('stall_check_of',    NoStallConstraint(modeling_options = modeling_options))
             
             if modeling_options['WISDEM']['RotorSE']['flag']: 
@@ -471,6 +474,12 @@ class WindPark(om.Group):
                 # va gt
                 self.add_subsystem('financese_post', PlantFinance(verbosity=modeling_options['General']['verbosity']))
             
+            # va gt
+            # Connections to Openfast
+            if self.options['modeling_options']['Floris']['flag'] or self.options["wt_init"]["environment"]["V_mean"]!=0:
+                self.connect("env.V_mean", "aeroelastic.site_weibull_Vmean")
+                self.connect("env.weibull_k", "aeroelastic.site_weibull_shape_factor")
+            # va gt                                     
             # Post-processing
             self.add_subsystem('outputs_2_screen_weis',  Outputs_2_Screen(modeling_options = modeling_options, opt_options = opt_options))
             if opt_options['opt_flag']:

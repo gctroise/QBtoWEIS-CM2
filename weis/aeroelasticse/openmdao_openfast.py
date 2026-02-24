@@ -54,6 +54,9 @@ class FASTLoadCases(ExplicitComponent):
     def initialize(self):
         self.options.declare('modeling_options')
         self.options.declare('opt_options')
+        # va gt
+        self.options.declare('wt_init')
+        # va gt
 
     def setup(self):
         modopt = self.options['modeling_options']
@@ -76,6 +79,12 @@ class FASTLoadCases(ExplicitComponent):
         self.add_input('Rtip',              val=0.0, units='m', desc='dimensional radius of tip')
         self.add_input('shearExp',    val=0.0,                   desc='shear exponent')
         self.add_input('lifetime', val=25.0, units='yr', desc='Turbine design lifetime')
+
+        # va gt
+        if self.options['modeling_options']['Floris']['flag'] or self.options["wt_init"]["environment"]["V_mean"]!=0:
+            self.add_input('site_weibull_Vmean', val=0.0, desc='site average wind speed')
+            self.add_input('site_weibull_shape_factor', val=0.0, desc='site weibull shape factor')
+        # va gt
 
         if not self.options['modeling_options']['OpenFAST']['from_openfast']:
             self.n_pitch       = n_pitch   = rotorse_options['n_pitch_perf_surfaces']
@@ -2160,7 +2169,7 @@ class FASTLoadCases(ExplicitComponent):
             outputs = self.get_monopile_loading(inputs, outputs)
 
         # If DLC 1.1 not used, calculate_AEP will just compute average power of simulations
-        outputs = self.calculate_AEP(case_list, dlc_generator, discrete_inputs, outputs)
+        outputs = self.calculate_AEP(case_list, dlc_generator, inputs, discrete_inputs, outputs)
 
         outputs = self.get_weighted_DELs(dlc_generator, inputs, discrete_inputs, outputs)
         
@@ -2429,8 +2438,8 @@ class FASTLoadCases(ExplicitComponent):
         outputs['monopile_maxMy_Mz'] = 1e-3*spline_Mz(z)
 
         return outputs
-
-    def calculate_AEP(self, case_list, dlc_generator, discrete_inputs, outputs):
+    # va gt
+    def calculate_AEP(self, case_list, dlc_generator, inputs, discrete_inputs, outputs):
         """
         Calculates annual energy production of the relevant DLCs in `case_list`.
 
@@ -2440,6 +2449,7 @@ class FASTLoadCases(ExplicitComponent):
         case_list : list
         dlc_list : list
         """
+    # va gt
         ## Get AEP and power curve
 
         # determine which dlc will be used for the powercurve calculations, allows using dlc 1.1 if specific power curve calculations were not run
@@ -2461,14 +2471,24 @@ class FASTLoadCases(ExplicitComponent):
                 U.append(dlc_generator.cases[i_case].URef)
 
         if len(U) > 0:
-            self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
+            # va gt
+            # self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
+            if (not self.options['modeling_options']['Floris']['flag']) and self.options["wt_init"]["environment"]["V_mean"]==0:
+                self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
+            else: 
+                self.cruncher.set_probability_wind_distribution(U, inputs['site_weibull_Vmean'][0], weibull_k=inputs['site_weibull_shape_factor'][0], idx=idx_pwrcrv)
+                print('! estimating power production using site wind characteristics !')
+            # va gt
 
         # Skip if we're not running with aerodynamics or controls/generator
         if not self.fst_vt['Fst']['CompAero'] or not self.fst_vt['Fst']['CompServo']:
             return outputs
-            
+
+        # va gt    
         AEP, _ = self.cruncher.compute_aep("GenPwr", idx=idx_pwrcrv)
+        AEP = AEP/3600 # convert to kWh
         outputs['AEP'] = AEP
+        # va gt               
 
         if len(idx_pwrcrv) > 0:
             sum_stats = sum_stats.iloc[idx_pwrcrv]
@@ -2483,12 +2503,20 @@ class FASTLoadCases(ExplicitComponent):
             logger.warning('WARNING: OpenFAST is run at a single wind speed. AEP cannot be estimated. Using average power instead.')
             
         # Calculate AEP and Performance Data
-        outputs['Cp_out'] = np.sum(prob * sum_stats['RtFldCp']['mean'])
-        outputs['Ct_out'] = np.sum(prob * sum_stats['RtFldCt']['mean'])
-        outputs['Omega_out'] = np.sum(prob * sum_stats['RotSpeed']['mean'])
-        outputs['pitch_out'] = np.sum(prob * sum_stats['BldPitch1']['mean'])
+        # va gt
+        
+        outputs['Cp_out'] = sum_stats['RtFldCp']['mean']
+        outputs['Ct_out'] = sum_stats['RtFldCt']['mean']
+        outputs['Omega_out'] = sum_stats['RotSpeed']['mean']
+        outputs['pitch_out'] = sum_stats['BldPitch1']['mean']
+        # outputs['Cp_out'] = np.sum(prob * sum_stats['RtFldCp']['mean'])
+        # outputs['Ct_out'] = np.sum(prob * sum_stats['RtFldCt']['mean'])
+        # outputs['Omega_out'] = np.sum(prob * sum_stats['RotSpeed']['mean'])
+        # outputs['pitch_out'] = np.sum(prob * sum_stats['BldPitch1']['mean'])
+        # va gt               
         if self.fst_vt['Fst']['CompServo'] == 1:
-            outputs['P_out'] = np.sum(prob * sum_stats['GenPwr']['mean']) * 1e3
+            # outputs['P_out'] = np.sum(prob * sum_stats['GenPwr']['mean']) * 1e3
+            outputs['P_out'] = sum_stats['GenPwr']['mean']* 1.e3                                                               
 
         return outputs
 
