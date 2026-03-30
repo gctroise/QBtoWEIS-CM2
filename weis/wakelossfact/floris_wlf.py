@@ -112,6 +112,7 @@ class wakelossfactor(om.ExplicitComponent):
         self.add_output('Cp_out_post', val=np.zeros(n_ws),                   desc='rotor aero power coefficient')
         self.add_output('Ct_out_post', val=np.zeros(n_ws),                   desc='rotor aero thrust coefficient')
         self.add_output('tilt_vals_post', val=np.zeros(self.options['modeling_options']['DLC_driver']['n_cases']),                   desc='tilt values for floris pitch correction')
+        # self.add_output('tilt_vals_post', val=np.zeros(n_ws),                   desc='tilt values for floris pitch correction')
 
         mydata= pd.read_table(self.wind_data_file, skiprows=[1])
         time_series = TimeSeries(

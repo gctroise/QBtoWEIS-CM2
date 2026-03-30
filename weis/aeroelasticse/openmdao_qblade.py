@@ -35,32 +35,31 @@ from weis.dlc_driver.dlc_generator    import DLCGenerator
 from weis.dlc_driver.dlc_generator    import DLCInstance
 from weis.aeroelasticse.CaseGen_General import CaseGen_General
 from functools import partial
-# from pCrunch import PowerProduction
-# from weis.aeroelasticse import FileTools
+from pCrunch import PowerProduction
 from weis.aeroelasticse.FAST_wrapper import Turbsim_wrapper, IEC_CoherentGusts
 from weis.aeroelasticse.utils import generate_wind_files
-
 from weis.aeroelasticse.utils import OLAFParams
 from rosco.toolbox import control_interface as ROSCO_ci
-# from pCrunch.io import OpenFASTOutput
-# from pCrunch import LoadsAnalysis, PowerProduction, FatigueParams
-from pCrunch import AeroelasticOutput, FatigueParams
+from pCrunch.io import OpenFASTOutput
+from pCrunch import LoadsAnalysis, PowerProduction, FatigueParams
 from weis.control.dtqp_wrapper          import dtqp_wrapper
 from weis.aeroelasticse.CaseGen_General import case_naming
 from wisdem.inputs import load_yaml, write_yaml
 ## neccessary inputs:
 import wisdem.commonse.cross_sections as cs
 
-from openfast_io.FAST_reader         import InputReader_OpenFAST
+from openfast_io.FAST_reader import InputReader_OpenFAST
 
 from weis.aeroelasticse.QBlade_writer         import InputWriter_QBlade
 import weis.aeroelasticse.QBlade_wrapper as qbwrap
 import random
 import base64
 
+#va gt
 from scipy.special import gamma
+#va gt
 
-_encoded_version = 'MS4xLjBfYmV0YQ=='
+_encoded_version = 'MS4xLjA='
 __version__ = base64.b64decode(_encoded_version).decode('utf-8')
 
 logger = logging.getLogger("wisdem/weis") 
@@ -101,11 +100,10 @@ class QBLADELoadCases(ExplicitComponent):
         self.add_input('shearExp',    val=0.0,                   desc='shear exponent')
 
         #va gt
-        if self.options['modeling_options']['Floris']['flag'] or self.options["wt_init"]["environment"]["V_mean"]!=0:
+        if self.options['modeling_options']['Floris']['flag']:
             self.add_input('site_weibull_Vmean', val=0.0, desc='site average wind speed')
             self.add_input('site_weibull_shape_factor', val=0.0, desc='site weibull shape factor')
         #va gt
-
         if not self.options['modeling_options']['QBlade']['from_qblade']:
 
             self.n_xy          = n_xy      = rotorse_options['n_xy'] # Number of coordinate points to describe the airfoil geometry
@@ -445,9 +443,9 @@ class QBLADELoadCases(ExplicitComponent):
             # Write input QB files and run QB
             if not qb_vt['QSim']['DLCGenerator']:
                 self.write_QBLADE(qb_vt, inputs, discrete_inputs)
-            dlc_generator = self.run_QBLADE(inputs, discrete_inputs, qb_vt)
+            summary_stats, extreme_table, DELs, Damage, chan_time, dlc_generator = self.run_QBLADE(inputs, discrete_inputs, qb_vt)
             # post process results
-            self.post_process(inputs, outputs, discrete_inputs, dlc_generator, discrete_outputs)
+            self.post_process(summary_stats, extreme_table, DELs, Damage, chan_time, inputs, outputs, discrete_inputs, dlc_generator, discrete_outputs)
 
             self.qb_inumber += 1
 
@@ -1294,7 +1292,7 @@ class QBLADELoadCases(ExplicitComponent):
                 wt_class, 
                 fix_wind_seeds, 
                 fix_wave_seeds, 
-                metocean,
+                metocean, 
                 modopt['DLC_driver'],
                 initial_condition_table,
                 )
@@ -1403,9 +1401,7 @@ class QBLADELoadCases(ExplicitComponent):
         elif qb_vt['QSim']['WNDTYPE'] == 1:
             script_path = os.path.join(weis_dir, 'weis', 'aeroelasticse', 'QTurbSim.py')  # Path to the TurbSim runner script
             wind_directory = self.wind_directory       
-            number_of_workers = modopt['General']['qblade_configuration']['number_of_workers']
-            self.TMax = np.ones_like(self.cases)*self.qb_vt['QSim']['TMax']
-            self.TStart = np.ones_like(self.cases)*self.qb_vt['QSim']['STOREFROM']              
+            number_of_workers = modopt['General']['qblade_configuration']['number_of_workers']                                        
 
             turbsim_params = [
                 wind_directory,
@@ -1421,9 +1417,7 @@ class QBLADELoadCases(ExplicitComponent):
         qblade.QBlade_libs          = os.path.join(weis_dir,path2qb_libs)
         qblade.QBLADE_runDirectory  = self.QBLADE_runDirectory
         qblade.QBLADE_namingOut     = self.QBLADE_namingOut
-        qblade.QBlade_InputFile     = self.QBLADE_InputFile
         qblade.qb_vt                = self.qb_vt
-        qblade.keep_time            = modopt['General']['qblade_configuration']['keep_time']
         qblade.number_of_workers    = modopt['General']['qblade_configuration']['number_of_workers']
         qblade.no_structure         = modopt['QBlade']['Turbine']['NOSTRUCTURE']
         qblade.store_qprs           = modopt['General']['qblade_configuration']['store_qprs']
@@ -1439,29 +1433,34 @@ class QBLADELoadCases(ExplicitComponent):
             ## TODO: This entire section must be redone to be compatible with QBlade!! - leads to many NaN's at the moment
             for u in ['U','L']:
                 blade_fatigue_root = FatigueParams(load2stress=1.0,
-                                                   slope=inputs[f'blade_spar{u}_wohlerexp'],
-                                                   ult_stress=1e-3*inputs[f'blade_spar{u}_ultstress'],
-                                                   S_intercept=1e-3*inputs[f'blade_spar{u}_wohlerA'])
+                                                lifetime=inputs['lifetime'],
+                                                slope=inputs[f'blade_spar{u}_wohlerexp'],
+                                                ult_stress=1e-3*inputs[f'blade_spar{u}_ultstress'],
+                                                S_intercept=1e-3*inputs[f'blade_spar{u}_wohlerA'])
                 blade_fatigue_te = FatigueParams(load2stress=1.0,
-                                                 slope=inputs[f'blade_te{u}_wohlerexp'],
-                                                 ult_stress=1e-3*inputs[f'blade_te{u}_ultstress'],
-                                                 S_intercept=1e-3*inputs[f'blade_te{u}_wohlerA'])
+                                                lifetime=inputs['lifetime'],
+                                                slope=inputs[f'blade_te{u}_wohlerexp'],
+                                                ult_stress=1e-3*inputs[f'blade_te{u}_ultstress'],
+                                                S_intercept=1e-3*inputs[f'blade_te{u}_wohlerA'])
                 
                 for k in range(1,self.n_blades+1):
                     blade_root_Fz = blade_fatigue_root.copy()
                     blade_root_Fz.load2stress = inputs[f'blade_root_spar{u}_load2stress'][2]
                     fatigue_channels[f'RootSpar{u}_Fzb{k}'] = blade_root_Fz
-                    magnitude_channels[f'RootSpar{u}_Fzb{k}'] = [f'Z_b Root For. BLD {k}']
+                    # magnitude_channels[f'RootSpar{u}_Fzb{k}'] = [f'Z_b Root For. BLD {k}']
+                    magnitude_channels[f'RootSpar{u}_Fzb{k}'] = [f'Z_b Root For. BLD_{k}']
 
                     blade_root_Mx = blade_fatigue_root.copy()
                     blade_root_Mx.load2stress = inputs[f'blade_root_spar{u}_load2stress'][3]
                     fatigue_channels[f'RootSpar{u}_Mxb{k}'] = blade_root_Mx
-                    magnitude_channels[f'RootSpar{u}_Mxb{k}'] = [f'X_b RootBend. Mom. BLD {k}']
+                    # magnitude_channels[f'RootSpar{u}_Mxb{k}'] = [f'X_b RootBend. Mom. BLD {k}']
+                    magnitude_channels[f'RootSpar{u}_Mxb{k}'] = [f'X_b RootBend. Mom. BLD_{k}']
 
                     blade_root_My = blade_fatigue_root.copy()
                     blade_root_My.load2stress = inputs[f'blade_root_spar{u}_load2stress'][4]
                     fatigue_channels[f'RootSpar{u}_Myb{k}'] = blade_root_My
                     magnitude_channels[f'RootSpar{u}_Myb{k}'] = [f'Y_b RootBend. Mom. BLD {k}']
+                    # magnitude_channels[f'RootSpar{u}_Myb{k}'] = [f'Y_b RootBend. Mom. BLD_{k}']
 
                     blade_maxc_Fz = blade_fatigue_te.copy()
                     blade_maxc_Fz.load2stress = inputs[f'blade_maxc_te{u}_load2stress'][2]
@@ -1481,10 +1480,10 @@ class QBLADELoadCases(ExplicitComponent):
             # Low speed shaft fatigue
             # Convert ultstress and S_intercept values to kPa with 1e-3 factor # 
             lss_fatigue = FatigueParams(load2stress=1.0,
-                                        dnv_name='B1',
-                                        dnv_type='air',
+                                        lifetime=inputs['lifetime'],
+                                        slope=inputs['lss_wohlerexp'],
                                         ult_stress=1e-3*inputs['lss_ultstress'],
-                                        S_intercept=1e-3*inputs['lss_wohlerA'])     
+                                        S_intercept=1e-3*inputs['lss_wohlerA'])        
             for s in ['Ax','Sh']:
                 sstr = 'axial' if s=='Ax' else 'shear'
                 for ik, k in enumerate(['F','M']):
@@ -1501,8 +1500,8 @@ class QBLADELoadCases(ExplicitComponent):
             # Fatigue at the tower base
             # Convert ultstress and S_intercept values to kPa with 1e-3 factor
             tower_fatigue_base = FatigueParams(load2stress=1.0,
-                                               dnv_name='D',
-                                               dnv_type='air',
+                                               lifetime=inputs['lifetime'],
+                                               slope=inputs['tower_wohlerexp'][0],
                                                ult_stress=1e-3*inputs['tower_ultstress'][0],
                                                S_intercept=1e-3*inputs['tower_wohlerA'][0])
             for s in ['Ax','Sh']:
@@ -1519,8 +1518,8 @@ class QBLADELoadCases(ExplicitComponent):
             # Fatigue at monopile base (mudline)
             if modopt['flags']['monopile']:
                 monopile_fatigue_base = FatigueParams(load2stress=1.0,
-                                                      dnv_name='D',
-                                                      dnv_type='sea',
+                                                      lifetime=inputs['lifetime'],
+                                                      slope=inputs['monopile_wohlerexp'][0],
                                                       ult_stress=inputs['monopile_ultstress'][0],
                                                       S_intercept=inputs['monopile_wohlerA'][0])
                 for s in ['Ax','Sh']:
@@ -1537,12 +1536,16 @@ class QBLADELoadCases(ExplicitComponent):
             # X_l For. SUB_member_{member-1} pos {rel_member_pos:.3f}
             qblade.fatigue_channels   = fatigue_channels
             qblade.magnitude_channels = magnitude_channels
-            
+            self.la = LoadsAnalysis(
+                outputs=[],
+                magnitude_channels=magnitude_channels,
+                fatigue_channels=fatigue_channels,
+            )
             self.magnitude_channels = magnitude_channels
 
-        self.cruncher = qblade.run_qblade_cases()
+        summary_stats, extreme_table, DELs, Damage, chan_time = qblade.run_qblade_cases()
 
-        return dlc_generator
+        return summary_stats, extreme_table, DELs, Damage, chan_time, dlc_generator
 
     def run_TurbSim(self, qb_vt):
         self.qb_vt = qb_vt
@@ -1621,15 +1624,16 @@ class QBLADELoadCases(ExplicitComponent):
                 channels_out += [f'Y_l Mom. TWR pos {twr_station:.3f} [Nm]']
                 channels_out += [f'Z_l Mom. TWR pos {twr_station:.3f} [Nm]']
 
-            channels_out += ["X_c Tip Trl.Def. (OOP) BLD 1 [m]", "Y_c Tip Trl.Def. (IP) BLD 1 [m]", "Z_c Tip Trl.Def. BLD 1 [m]", "X_c Tip Trl.Def. (OOP) BLD 2 [m]", "Y_c Tip Trl.Def. (IP) BLD 2 [m]", "Z_c Tip Trl.Def. BLD 2 [m]"]
-            channels_out += ["X_c RootBend. Mom. (IP) BLD 1 [Nm]", "Y_c RootBend. Mom. (OOP) BLD 1 [Nm]", "Z_c RootBend. Mom. BLD 1 [Nm]", "X_c RootBend. Mom. (IP) BLD 2 [Nm]", "Y_c RootBend. Mom. (OOP) BLD 2 [Nm]", "Z_c RootBend. Mom. BLD 2 [Nm]"]
-            channels_out += ["X_b Tip Trl.Def. (FLAP) BLD 1 [m]", "Y_b Tip Trl.Def. (EDGE) BLD 1 [m]", "Z_b Tip Trl.Def. (LONG) BLD 1 [m]", "X_b Tip Trl.Def. (FLAP) BLD 2 [m]", "Y_b Tip Trl.Def. (EDGE) BLD 2 [m]", "Z_b Tip Trl.Def. (LONG) BLD 2 [m]"]
-            channels_out += ["X_b RootBend. Mom. BLD 1 [Nm]", "Y_b RootBend. Mom. BLD 1 [Nm]", "Z_b RootBend. Mom. BLD 1 [Nm]", "X_b RootBend. Mom. BLD 2 [Nm]", "Y_b RootBend. Mom. BLD 2 [Nm]", "Z_b RootBend. Mom. BLD 2 [Nm]"]
-            channels_out += ["X_c Root For. BLD 1 [N]","Y_c Root For. BLD 1 [N]","Z_c Root For. BLD 1 [N]", "X_c Root For. BLD 2 [N]","Y_c Root For. BLD 2 [N]","Z_c Root For. BLD 2 [N]"]
-            channels_out += ["X_b Root For. BLD 1 [N]",  "Y_b Root For. BLD 1 [N]", "Z_b Root For. BLD 1 [N]", "X_b Root For. BLD 2 [N]",  "Y_b Root For. BLD 2 [N]", "Z_b Root For. BLD 2 [N]"]
+            channels_out += ["X_c Tip Trl.Def. (OOP) BLD_1 [m]", "Y_c Tip Trl.Def. (IP) BLD_1 [m]", "Z_c Tip Trl.Def. BLD_1 [m]", "X_c Tip Trl.Def. (OOP) BLD_2 [m]", "Y_c Tip Trl.Def. (IP) BLD_2 [m]", "Z_c Tip Trl.Def. BLD_2 [m]"]
+            channels_out += ["X_c RootBend. Mom. (IP) BLD_1 [Nm]", "Y_c RootBend. Mom. (OOP) BLD_1 [Nm]", "Z_c RootBend. Mom. BLD_1 [Nm]", "X_c RootBend. Mom. (IP) BLD_2 [Nm]", "Y_c RootBend. Mom. (OOP) BLD_2 [Nm]", "Z_c RootBend. Mom. BLD_2 [Nm]"]
+            channels_out += ["X_b Tip Trl.Def. (FLAP) BLD_1 [m]", "Y_b Tip Trl.Def. (EDGE) BLD_1 [m]", "Z_b Tip Trl.Def. (LONG) BLD_1 [m]", "X_b Tip Trl.Def. (FLAP) BLD_2 [m]", "Y_b Tip Trl.Def. (EDGE) BLD_2 [m]", "Z_b Tip Trl.Def. (LONG) BLD_2 [m]"]
+            channels_out += ["X_b RootBend. Mom. BLD_1 [Nm]", "Y_b RootBend. Mom. BLD_1 [Nm]", "Z_b RootBend. Mom. BLD_1 [Nm]", "X_b RootBend. Mom. BLD_2 [Nm]", "Y_b RootBend. Mom. BLD_2 [Nm]", "Z_b RootBend. Mom. BLD_2 [Nm]"]
+            channels_out += ["X_c Root For. BLD_1 [N]","Y_c Root For. BLD_1 [N]","Z_c Root For. BLD_1 [N]", "X_c Root For. BLD_2 [N]","Y_c Root For. BLD_2 [N]","Z_c Root For. BLD_2 [N]"]
+            channels_out += ["X_b Root For. BLD_1 [N]",  "Y_b Root For. BLD_1 [N]", "Z_b Root For. BLD_1 [N]", "X_b Root For. BLD_2 [N]",  "Y_b Root For. BLD_2 [N]", "Z_b Root For. BLD_2 [N]"]
             channels_out += ["Aero. Power Coefficient [-]", "Thrust Coefficient [-]"]
             channels_out += ["Rotational Speed [rpm]", "HSS Rpm [rpm]", "Yaw Angle [deg]", "LSS Azimuthal Pos. [deg]"]
-            channels_out += ["Gen. Elec. Power [W]", "Gen. HSS Torque [Nm]", "Pitch Angle Blade 1 [deg]", "Pitch Angle Blade 2 [deg]"]
+            # channels_out += ["Gen. Elec. Power [W]", "Gen. HSS Torque [Nm]", "Pitch Angle Blade 1 [deg]", "Pitch Angle Blade 2 [deg]"]
+            channels_out += ["Gen. Elec. Power [W]", "Gen. HSS Torque [Nm]", "Pitch Angle BLD_1 [deg]", "Pitch Angle BLD_2 [deg]"]
             channels_out += ["Abs Inflow Vel. at Hub [m/s]", "X_g Inflow Vel. at Hub [m/s]", "Y_g Inflow Vel. at Hub [m/s]", "Z_g Inflow Vel. at Hub [m/s]"]
             channels_out += ["X_g Inflow Vel. Rotor Avg. [m/s]", "Y_g Inflow Vel. Rotor Avg. [m/s]", "Z_g Inflow Vel. Rotor Avg. [m/s]"]
             channels_out += ["X_tb For. TWR Bot. Constr. [N]", "Y_tb For. TWR Bot. Constr. [N]", "Z_tb For. TWR Bot. Constr. [N]", "X_tb Mom. TWR Bot. Constr. [Nm]", "Y_tb Mom. TWR Bot. Constr. [Nm]", "Z_tb Mom. TWR Bot. Constr. [Nm]"]
@@ -1638,18 +1642,19 @@ class QBLADELoadCases(ExplicitComponent):
             channels_out += ["X_s For. Shaft Const. [N]", "Y_s For. Shaft Const. [N]", "Z_s For. Shaft Const. [N]"]  # ["LSShftFxs", "LSShftFys", "LSShftFzs" non-rotating
             channels_out += ["Aero. LSS Torque [Nm]", "X_s Mom. Shaft Const. [Nm]", "Y_s Mom. Shaft Const. [Nm]", "Z_s Mom. Shaft Const. [Nm]", "Y_h Mom. Hub Const. [Nm]", "Z_h Mom. Hub Const. [Nm]"]
             channels_out += ["X_n Nac. Acc. [m^2/s]", "Y_n Nac. Acc. [m^2/s]", "Z_n Nac. Acc. [m^2/s]"]
-            channels_out += ["Aero. Power [W]", "Wave Elev. HYDRO WavekinEval. Pos. [m]"]
-            channels_out += ["Pitch Vel. BLD 1 [deg/s]", "Pitch Vel. BLD 2 [deg/s]"]
+            # channels_out += ["Aero. Power [W]", "Wave Elev. HYDRO WavekinEval. Pos. [m]"]
+            channels_out += ["Aero. Power [W]", "HYDRO WavekinEval. Wave Elevation [m]"]
+            channels_out += ["Pitch Vel. BLD_1 [deg/s]", "Pitch Vel. BLD_2 [deg/s]"]
 
             if self.n_blades == 3:
-                channels_out += ["X_c Tip Trl.Def. (OOP) BLD 3 [m]", "Y_c Tip Trl.Def. (IP) BLD 3 [m]", "Z_c Tip Trl.Def. BLD 3 [m]"]
-                channels_out += ["X_c RootBend. Mom. (IP) BLD 3 [Nm]", "Y_c RootBend. Mom. (OOP) BLD 3 [Nm]", "Z_c RootBend. Mom. BLD 3 [Nm]"]
-                channels_out += ["X_b Tip Trl.Def. (FLAP) BLD 3 [m]", "Y_b Tip Trl.Def. (EDGE) BLD 3 [m]", "Z_b Tip Trl.Def. (LONG) BLD 3 [m]"]
-                channels_out += ["X_b RootBend. Mom. BLD 3 [Nm]", "Y_b RootBend. Mom. BLD 3 [Nm]", "Z_b RootBend. Mom. BLD 3 [Nm]"]
-                channels_out += ["X_c Root For. BLD 3 [N]","Y_c Root For. BLD 3 [N]","Z_c Root For. BLD 3 [N]"]
-                channels_out += ["X_b Root For. BLD 3 [N]",  "Y_b Root For. BLD 3 [N]", "Z_b Root For. BLD 3 [N]"]
-                channels_out += ["Pitch Angle Blade 3 [deg]"]
-                channels_out += ["Pitch Vel. BLD 3 [deg/s]"]
+                channels_out += ["X_c Tip Trl.Def. (OOP) BLD_3 [m]", "Y_c Tip Trl.Def. (IP) BLD_3 [m]", "Z_c Tip Trl.Def. BLD_3 [m]"]
+                channels_out += ["X_c RootBend. Mom. (IP) BLD_3 [Nm]", "Y_c RootBend. Mom. (OOP) BLD_3 [Nm]", "Z_c RootBend. Mom. BLD_3 [Nm]"]
+                channels_out += ["X_b Tip Trl.Def. (FLAP) BLD_3 [m]", "Y_b Tip Trl.Def. (EDGE) BLD_3 [m]", "Z_b Tip Trl.Def. (LONG) BLD_3 [m]"]
+                channels_out += ["X_b RootBend. Mom. BLD_3 [Nm]", "Y_b RootBend. Mom. BLD_3 [Nm]", "Z_b RootBend. Mom. BLD_3 [Nm]"]
+                channels_out += ["X_c Root For. BLD_3 [N]","Y_c Root For. BLD_3 [N]","Z_c Root For. BLD_3 [N]"]
+                channels_out += ["X_b Root For. BLD_3 [N]",  "Y_b Root For. BLD_3 [N]", "Z_b Root For. BLD_3 [N]"]
+                channels_out += ["Pitch Angle BLD_3 [deg]"]
+                channels_out += ["Pitch Vel. BLD_3 [deg/s]"]
             
             if modopt['flags']['floating']:
                 channels_out += ["NP Trans. X_g [m]", "NP Trans. Y_g [m]", "NP Trans. Z_g [m]", "NP Roll X_l [deg]", "NP Pitch Y_l [deg]", "NP Yaw Z_l [deg]"]
@@ -1676,12 +1681,12 @@ class QBLADELoadCases(ExplicitComponent):
             channels_out = ["Time [s]"]
             channels_out += ["Power Coefficient [-]", "Thrust Coefficient [-]"]
             channels_out += ["Rotational Speed [rpm]", "Yaw Angle [deg]"]
-            channels_out += ["Pitch Angle Blade 1 [deg]", "Pitch Angle Blade 2 [deg]"]
+            channels_out += ["Pitch Angle BLD_1 [deg]", "Pitch Angle BLD_2 [deg]"]
             channels_out += ["X_g Inflow Vel. at Hub [m/s]", "Y_g Inflow Vel. at Hub [m/s]", "Z_g Inflow Vel. at Hub [m/s]"]
             channels_out += ["Aerodynamic Power [W]"]
 
             if self.n_blades == 3:
-                    channels_out += ["Pitch Angle Blade 3 [deg]"]
+                    channels_out += ["Pitch Angle BLD_3 [deg]"]
         
         return channels_out
 
@@ -1705,16 +1710,16 @@ class QBLADELoadCases(ExplicitComponent):
         i_qb_vt = copy.deepcopy(qb_vt) # create one instance of qb_vt per case to be simulated
         
         if qb_vt['QSim']['WNDTYPE'] == 1:
-            self.cases = len(qb_vt['QTurbSim']['URef'])
+            cases = len(qb_vt['QTurbSim']['URef'])
             module = 'QTurbSim'
             wind_ref = 'URef'
             i_qb_vt['QSim']['MEANINF'] = 0 # has to be set as a number and not an array in order to avoid QBlade crashing
         else:
-            self.cases = len(qb_vt['QSim']['MEANINF'])
+            cases = len(qb_vt['QSim']['MEANINF'])
             module = 'QSim'
             wind_ref = 'MEANINF'
         
-        for idx in range(self.cases):
+        for idx in range(cases):
             i_qb_vt[module][wind_ref]          = float(qb_vt[module][wind_ref][idx])
             i_qb_vt['QSim']['RPMPRESCRIBED']   = float(qb_vt['QSim']['RPMPRESCRIBED'][idx])
             i_qb_vt['QSim']['INITIAL_PITCH']   = float(qb_vt['QSim']['INITIAL_PITCH'][idx])
@@ -1735,11 +1740,11 @@ class QBLADELoadCases(ExplicitComponent):
             writer.QBLADE_runDirectory  = self.QBLADE_runDirectory
             writer.QBLADE_namingOut     = self.QBLADE_namingOut + QBLADE_namingOut_appendix
 
-            if idx == (self.cases-1) and modopt['General']['qblade_configuration']['store_turbines']:
+            if idx == (cases-1) and modopt['General']['qblade_configuration']['store_turbines']:
                 self.qb_vt_stored = i_qb_vt
                 self.QBLADE_namingOut_stored = self.QBLADE_namingOut + QBLADE_namingOut_appendix
 
-            writer.execute()  
+            writer.execute()
 
     def write_QBLADE_DLCGenerator(self, qb_vt, inputs, discrete_inputs,case_list,case_name):
         modopt = self.options['modeling_options']
@@ -1785,7 +1790,7 @@ class QBLADELoadCases(ExplicitComponent):
                 self.qb_vt_stored = i_qb_vt
                 self.QBLADE_namingOut_stored =  case_name[idx]
 
-            writer.execute() 
+            writer.execute()
 
     def init_QBlade_model(self):
         modopt = self.options['modeling_options']
@@ -1835,139 +1840,116 @@ class QBLADELoadCases(ExplicitComponent):
                 qb_vt['QTurbSim'][key] = modeling_options['QBlade']['QTurbSim'][key]
         return qb_vt
 
-    def post_process(self, inputs, outputs, discrete_inputs, dlc_generator, discrete_outputs):
+    def post_process(self, summary_stats, extreme_table, DELs, damage, chan_time, inputs, outputs, discrete_inputs, dlc_generator, discrete_outputs):
         # leaning heavily on equivalent funtion in "openmdao_openfast.py"
+        # TODO do the post-processing acutally for DLCs and not only idealized cases
         modopt = self.options['modeling_options']
         
         if not self.qb_vt['Turbine']['NOSTRUCTURE']:
-            
             if self.options['modeling_options']['flags']['blade']:
-                outputs = self.get_blade_loading(inputs, outputs)
+                outputs = self.get_blade_loading(summary_stats, extreme_table, inputs, outputs)
             if self.options['modeling_options']['flags']['tower']:
-                outputs = self.get_tower_loading(inputs, outputs)
+                outputs = self.get_tower_loading(summary_stats, extreme_table, inputs, outputs)
             if modopt['flags']['monopile']:
-                outputs = self.get_monopile_loading(inputs, outputs)
+                outputs = self.get_monopile_loading(summary_stats, extreme_table, inputs, outputs)
 
-            outputs = self.calculate_AEP(inputs, outputs, discrete_inputs, dlc_generator)
+            outputs = self.calculate_AEP(summary_stats, inputs, outputs, discrete_inputs, dlc_generator)
 
-            outputs = self.get_weighted_DELs(dlc_generator, inputs, discrete_inputs, outputs)
+            outputs = self.get_weighted_DELs(DELs, damage, discrete_inputs, outputs)
             
-            outputs = self.get_control_measures(dlc_generator, inputs, outputs)
+            outputs = self.get_control_measures(summary_stats, chan_time, inputs, outputs)
 
             if modopt['flags']['floating']: # TODO: or (modopt['QBlade']['from_qblade'] and self.qb_vt['Fst']['CompMooring']>0):
-                outputs = self.get_floating_measures(inputs, outputs)
+                outputs = self.get_floating_measures(summary_stats, chan_time, inputs, outputs)
 
-            if modopt['QBlade']['flag']:
-                if any(self.cruncher.summary_stats['qblade_failed']['max'] > 0):
-                    outputs['qblade_failed'] = 2
-
+            if any(summary_stats['qblade_failed']['max'] > 0):
+                outputs['qblade_failed'] = 2
+            
             # Save Data
             if modopt['General']['qblade_configuration']['save_timeseries']:
-                self.save_timeseries()
+                self.save_timeseries(chan_time)
 
             if modopt['General']['qblade_configuration']['save_iterations']:
-                self.save_iterations(discrete_outputs)
-
-            if modopt['General']['qblade_configuration']['store_turbines']:
-                self.store_turbines() 
+                self.save_iterations(summary_stats,DELs,discrete_outputs)
 
             if modopt['General']['qblade_configuration']['store_turbines']:
                 self.store_turbines()
         else:
-            outputs = self.calculate_AEP(inputs, outputs, discrete_inputs, dlc_generator)
+            outputs = self.calculate_AEP(summary_stats, inputs, outputs, discrete_inputs)
 
-    def get_weighted_DELs(self, dlc_generator, inputs, discrete_inputs, outputs):
+    def get_weighted_DELs(self, DELs, damage, discrete_inputs, outputs):
         modopt = self.options['modeling_options']
-
-        fatigue_dlc_operation = ['1.2', '3.1', '4.1']
-        fatigue_dlc_parked = ['6.4']
-        fatigue_dlc_fault = ['2.4', '7.2']
-        fatigue_dlcs = fatigue_dlc_operation + fatigue_dlc_parked + fatigue_dlc_fault
-        
-        # See if we have fatigue DLCs
-        if not dlc_generator == None:
-            U = np.zeros(dlc_generator.n_cases)
-        elif self.qb_vt['QSim']['WNDTYPE'] == 1:
+        if self.qb_vt['QSim']['WNDTYPE'] == 1 or self.qb_vt['QSim']['DLCGenerator']:
             U = self.qb_vt['QTurbSim']['URef']    
         else:
             U = self.qb_vt['QSim']['MEANINF']
-        ifat = []
-        iop = []
-        inonop = []
-        ifault = []
-        
-        if not dlc_generator == None:
-            for k in range(dlc_generator.n_cases):
-                U[k] = dlc_generator.cases[k].URef
-                
-                if str(dlc_generator.cases[k].label) in fatigue_dlcs:
-                    ifat.append( k )
-                    if str(dlc_generator.cases[k].label) in fatigue_dlc_operation:
-                        iop.append( k )
-                    elif str(dlc_generator.cases[k].label) in fatigue_dlc_parked:
-                        inonop.append( k )
-                    elif str(dlc_generator.cases[k].label) in fatigue_dlc_fault:
-                        ifault.append( k )
-
-        # If fatigue DLCs are present, then limit analysis to those only
-        if len(ifat) > 0:
-            U = U[ifat]
-
+      
         # Get wind distribution probabilities, make sure they are normalized
-        self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=ifat)
+        pp = PowerProduction(discrete_inputs['turbine_class'])
+        ws_prob = pp.prob_WindDist(U, disttype='pdf')
+        ws_prob /= ws_prob.sum()
 
         # Scale all DELs and damage by probability and collapse over the various DLCs (inner dot product)
-        dels_total, damage_total = self.cruncher.compute_total_fatigue(lifetime=inputs['lifetime'],
-                                                                       idx=iop, idx_park=inonop, idx_fault=ifault, n_fault=10)
-        dels_total = dels_total.loc['Weighted']
-        damage_total = damage_total.loc['Weighted']
+        # Also work around NaNs
+        DELs = DELs.fillna(0.0).multiply(ws_prob, axis=0).sum()
+        damage = damage.fillna(0.0).multiply(ws_prob, axis=0).sum()
         
         # Standard DELs for blade root and tower base
-        outputs['DEL_RootMyb'] = np.max([dels_total[f'Y_b RootBend. Mom. BLD {k+1}'] for k in range(self.n_blades)])
-        outputs['DEL_TwrBsMyt'] = dels_total['TwrBsM']
-        outputs['DEL_TwrBsMyt_ratio'] = dels_total['TwrBsM']/self.options['opt_options']['constraints']['control']['DEL_TwrBsMyt']['max']
+        # outputs['DEL_RootMyb'] = np.max([DELs[f'Y_b RootBend. Mom. BLD {k+1}'] for k in range(self.n_blades)])
+        outputs['DEL_RootMyb'] = np.max([DELs[f'Y_b RootBend. Mom. BLD_{k+1}'] for k in range(self.n_blades)])
+        outputs['DEL_TwrBsMyt'] = DELs['TwrBsM']
+        outputs['DEL_TwrBsMyt_ratio'] = DELs['TwrBsM']/self.options['opt_options']['constraints']['control']['DEL_TwrBsMyt']['max']
             
         # Compute total fatigue damage in spar caps at blade root and trailing edge at max chord location
         if not modopt['QBlade']['from_qblade']:
             for k in range(1,self.n_blades+1):
                 for u in ['U','L']:
-                    damage_total[f'BladeRootSpar{u}_Axial{k}'] = (damage_total[f'RootSpar{u}_Fzb{k}'] +
-                                                                  damage_total[f'RootSpar{u}_Mxb{k}'] +
-                                                                  damage_total[f'RootSpar{u}_Myb{k}'])
-                    damage_total[f'BladeMaxcTE{u}_Axial{k}'] = (damage_total[f'Spn2te{u}_FLzb{k}'] +
-                                                                damage_total[f'Spn2te{u}_MLxb{k}'] +
-                                                                damage_total[f'Spn2te{u}_MLyb{k}'])
-                    
-            # Compute total fatigue damage in low speed shaft, tower base, monopile base
-            damage_total['LSSAxial'] = damage_total['LSShftAxFxa'] + damage_total['LSShftAxMyza']
-            damage_total['LSSShear'] = damage_total['LSShftAxFyza'] + damage_total['LSShftAxMxa']
-            damage_total['TowerBaseAxial'] = damage_total['TwrBsAxForZt'] + damage_total['TwrBsAxMomXYt']
-            damage_total['TowerBaseShear'] = damage_total['TwrBsAxForXYt'] + damage_total['TwrBsAxMomZt']
-            if modopt['flags']['monopile']: # TODO: verify thhat this works as well
-                damage_total['MonopileBaseAxial'] = damage_total['M1N1AxFKze'] + damage_total['M1N1AxMKxye']
-                damage_total['MonopileBaseShear'] = damage_total['M1N1AxFKxye'] + damage_total['M1N1AxMKze']
-            else:
-                damage_total['MonopileBaseAxial'] = damage_total['MonopileBaseShear'] = 0.0
+                    damage[f'BladeRootSpar{u}_Axial{k}'] = (damage[f'RootSpar{u}_Fzb{k}'] +
+                                                        damage[f'RootSpar{u}_Mxb{k}'] +
+                                                        damage[f'RootSpar{u}_Myb{k}'])
+                    damage[f'BladeMaxcTE{u}_Axial{k}'] = (damage[f'Spn2te{u}_FLzb{k}'] +
+                                                        damage[f'Spn2te{u}_MLxb{k}'] +
+                                                        damage[f'Spn2te{u}_MLyb{k}'])
 
-            # Assemble damages
-            outputs['damage_blade_root_sparU'] = np.max([damage_total[f'BladeRootSparU_Axial{k+1}'] for k in range(self.n_blades)])
-            outputs['damage_blade_root_sparL'] = np.max([damage_total[f'BladeRootSparL_Axial{k+1}'] for k in range(self.n_blades)])
-            outputs['damage_blade_maxc_teU'] = np.max([damage_total[f'BladeMaxcTEU_Axial{k+1}'] for k in range(self.n_blades)])
-            outputs['damage_blade_maxc_teL'] = np.max([damage_total[f'BladeMaxcTEL_Axial{k+1}'] for k in range(self.n_blades)])
-            outputs['damage_lss'] = np.max( [damage_total['LSSAxial'], damage_total['LSSShear']] )
-            outputs['damage_tower_base'] = np.max( [damage_total['TowerBaseAxial'], damage_total['TowerBaseShear']] )
-            outputs['damage_monopile_base'] = np.max( [damage_total['MonopileBaseAxial'], damage_total['MonopileBaseShear']] )
+            # Compute total fatigue damage in low speed shaft, tower base, monopile base
+            damage['LSSAxial'] = 0.0
+            damage['LSSShear'] = 0.0
+            damage['TowerBaseAxial'] = 0.0
+            damage['TowerBaseShear'] = 0.0
+            damage['MonopileBaseAxial'] = 0.0
+            damage['MonopileBaseShear'] = 0.0
             
+            for s in ['Ax','Sh']:
+                sstr = 'Axial' if s=='Ax' else 'Shear'
+                for ik, k in enumerate(['F','M']):
+                    for ix, x in enumerate(['x','yz']):
+                        damage[f'LSS{sstr}'] += damage[f'LSShft{s}{k}{x}a']
+
+            for s in ['Ax','Sh']:
+                sstr = 'Axial' if s=='Ax' else 'Shear'
+                for ik, k in enumerate(['For','Mom']):
+                    for ix, x in enumerate(['Z','XY']):
+                        damage[f'TowerBase{sstr}'] += damage[f'TwrBs{s}{k}{x}t']
+                        if modopt['flags']['monopile'] and modopt['Level3']['flag']:
+                            damage[f'MonopileBase{sstr}'] += damage[f'M1N1{s}{k}K{x}e']
+            
+            # Assemble damages
+            outputs['damage_blade_root_sparU'] = np.max([damage[f'BladeRootSparU_Axial{k+1}'] for k in range(self.n_blades)])
+            outputs['damage_blade_root_sparL'] = np.max([damage[f'BladeRootSparL_Axial{k+1}'] for k in range(self.n_blades)])
+            outputs['damage_blade_maxc_teU'] = np.max([damage[f'BladeMaxcTEU_Axial{k+1}'] for k in range(self.n_blades)])
+            outputs['damage_blade_maxc_teL'] = np.max([damage[f'BladeMaxcTEL_Axial{k+1}'] for k in range(self.n_blades)])
+            outputs['damage_lss'] = np.sqrt( damage['LSSAxial']**2 + damage['LSSShear']**2 )
+            outputs['damage_tower_base'] = np.sqrt( damage['TowerBaseAxial']**2 + damage['TowerBaseShear']**2 )
+            outputs['damage_monopile_base'] = np.sqrt( damage['MonopileBaseAxial']**2 + damage['MonopileBaseShear']**2 )
+
             # Log damages
             if self.options['opt_options']['constraints']['damage']['tower_base']['log']:
                 outputs['damage_tower_base'] = np.log(outputs['damage_tower_base'])
 
         return outputs
     
-    def calculate_AEP(self, inputs, outputs, discrete_inputs, dlc_generator):
+    def calculate_AEP(self, sum_stats, inputs, outputs, discrete_inputs, dlc_generator):
         
-        sum_stats = self.cruncher.summary_stats
-
         modopts = self.options['modeling_options']
         DLCs = [i_dlc['DLC'] for i_dlc in modopts['DLC_driver']['DLCs']]
         if 'AEP' in DLCs:
@@ -1975,112 +1957,88 @@ class QBLADELoadCases(ExplicitComponent):
         else:
             DLC_label_for_AEP = '1.1'
             logger.warning('WARNING: DLC 1.1 is being used for AEP calculations.  Use the AEP DLC for more accurate wind modeling with constant TI.')
-        
-        
+
         if self.qb_vt['QSim']['DLCGenerator']:
             idx_pwrcrv = []
             U = []
             for i_case in range(dlc_generator.n_cases):
                 if dlc_generator.cases[i_case].label == DLC_label_for_AEP:
-                    idx_pwrcrv.append(i_case)
-                    U.append(dlc_generator.cases[i_case].URef)
-
-            if len(U) > 0:
-                #va gt
-                # self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
-                #va gt
-                
-                #va gt
-                if (not self.options['modeling_options']['Floris']['flag']) and self.options["wt_init"]["environment"]["V_mean"]==0:
-                    self.cruncher.set_probability_turbine_class(U, discrete_inputs['turbine_class'], idx=idx_pwrcrv)
-                else: 
-                    self.cruncher.set_probability_wind_distribution(U, inputs['site_weibull_Vmean'][0], weibull_k=inputs['site_weibull_shape_factor'][0], idx=idx_pwrcrv)
-                    print('! estimating power production using site wind charactristics !')
-                #va gt
-
-            if len(idx_pwrcrv) > 0:
-                sum_stats = sum_stats.iloc[idx_pwrcrv]
-                outputs['V_out'] = np.unique(U)
-                prob = self.cruncher.prob[idx_pwrcrv]
-            elif len(idx_pwrcrv) == 0 and self.qb_vt['QSim']['DLCGenerator']:
-                outputs['V_out'] = dlc_generator.cases[0].URef
-                prob = self.cruncher.prob
-                logger.warning('WARNING: QBlade is not run using DLC AEP, 1.1, or 1.2. AEP cannot be estimated well. Using average power instead.')
-
-            if not self.qb_vt['Turbine']['NOSTRUCTURE']:
-                # va gt
-                # AEP, _ = self.cruncher.compute_aep("Gen. Elec. Power", idx=idx_pwrcrv)
-                AEP, _ = self.cruncher.compute_aep("Gen. Elec. Power", idx=idx_pwrcrv)
-                AEP = AEP/3600 # convert to kWh
-                # va gt
-                #va gt
-                # outputs['Cp_out']       = np.sum(prob * sum_stats['Aero. Power Coefficient']['mean'])
-                outputs['Cp_out']       = sum_stats['Aero. Power Coefficient']['mean']
-                #va gt
-                outputs['AEP'] = AEP
-            else:
-                # va gt
-                # AEP, _ = self.cruncher.compute_aep("Aerodynamic Power", idx=idx_pwrcrv)
-                AEP, _ = self.cruncher.compute_aep("Aerodynamic Power", idx=idx_pwrcrv)
-                AEP = AEP/3600 # convert to kWh
-                # va gt
-                #va gt
-                # outputs['Cp_out']       = np.sum(prob * sum_stats['Power Coefficient']['mean'])
-                outputs['Cp_out']       = sum_stats['Power Coefficient']['mean']
-                #va gt
-                
-            outputs['AEP'] = AEP
-            #va gt
-            # outputs['Ct_out']       = np.sum(prob * sum_stats['Thrust Coefficient']['mean'])
-            # outputs['Omega_out']    = np.sum(prob * sum_stats['Rotational Speed']['mean'])
-            # outputs['pitch_out']    = np.sum(prob * sum_stats['Pitch Angle Blade 1']['mean'])
-            outputs['Ct_out']       = sum_stats['Thrust Coefficient']['mean']
-            outputs['Omega_out']    = sum_stats['Rotational Speed']['mean']
-            outputs['pitch_out']    = sum_stats['Pitch Angle Blade 1']['mean']
-            #va gt
-            #va gt
-            # if self.qb_vt['Turbine']['CONTROLLERTYPE'] > 0:
-                # outputs['P_out'] = np.sum(prob * sum_stats['Gen. Elec. Power']['mean']) * 1e3
-            outputs['P_out']        = sum_stats['Gen. Elec. Power']['mean'] * 1.e3
-            #va gt
-
-        else: # for when we don't use the DLC generator 
-            logger.warning('WARNING: QBlade is not run using the DLC generator AEP cannot be estimated. Using average power/Cp/Ct/rpm/pitch_angle instead.')
-
-            if len(sum_stats['Aero. Power Coefficient']['mean']) == 1: 
-                if not self.qb_vt['Turbine']['NOSTRUCTURE']:
-                    outputs['Cp_out']       = sum_stats['Aero. Power Coefficient']['mean']
-                    outputs['AEP']          = sum_stats['Gen. Elec. Power']['mean']
-                    outputs['P_out']        = sum_stats['Gen. Elec. Power']['mean'].iloc[0] * 1.e3
-                else:
-                    outputs['Cp_out']       = sum_stats['Power Coefficient']['mean']
-                    outputs['AEP']          = sum_stats['Aerodynamic Power']['mean']
-                    outputs['P_out']        = sum_stats['Aerodynamic Power']['mean'].iloc[0] * 1.e3
-
-                outputs['Ct_out']       = sum_stats['Thrust Coefficient']['mean']
-                outputs['Omega_out']    = sum_stats['Rotational Speed']['mean']
-                outputs['pitch_out']    = sum_stats['Pitch Angle Blade 1']['mean']   
-
-            else:
-                if not self.qb_vt['Turbine']['NOSTRUCTURE']:
-                    outputs['Cp_out']       = sum_stats['Aero. Power Coefficient']['mean'].mean()
-                    outputs['AEP']          = sum_stats['Gen. Elec. Power']['mean'].mean()
-                    outputs['P_out']        = sum_stats['Gen. Elec. Power']['mean'].iloc[0]
-                else:
-                    outputs['Cp_out']       = sum_stats['Power Coefficient']['mean'].mean()
-                    outputs['AEP']          = sum_stats['Aerodynamic Power']['mean'].mean()
-                    outputs['P_out']        = sum_stats['Aerodynamic Power']['mean'].iloc[0]
-
-                outputs['Ct_out']       = sum_stats['Thrust Coefficient']['mean'].mean()
-                outputs['Omega_out']    = sum_stats['Rotational Speed']['mean'].mean()
-                outputs['pitch_out']    = sum_stats['Pitch Angle Blade 1']['mean'].mean()                   
-                logger.warning('WARNING: QBlade is not run using DLC 1.1/1.2. AEP cannot be estimated. Using average power instead.')   
-
-            outputs['V_out'] = sum_stats['X_g Inflow Vel. at Hub']['mean'].mean()
+                    idx_pwrcrv = np.append(idx_pwrcrv, i_case)
+                    U = np.append(U, dlc_generator.cases[i_case].URef)
             
+            stats_pwrcrv = sum_stats.iloc[idx_pwrcrv].copy()
+        
+        else:
+            U = []
+            stats_pwrcrv = sum_stats.copy()   
+
+        if not self.qb_vt['Turbine']['NOSTRUCTURE']:
+            # pwr_curve_vars_qb   = ['Gen. Elec. Power', 'Aero. Power Coefficient', 'Thrust Coefficient', 'Rotational Speed', 'Pitch Angle Blade 1']
+            pwr_curve_vars_qb   = ['Gen. Elec. Power', 'Aero. Power Coefficient', 'Thrust Coefficient', 'Rotational Speed', 'Pitch Angle BLD_1']
+        else:
+            # pwr_curve_vars_qb   = ['Aerodynamic Power', 'Power Coefficient', 'Thrust Coefficient', 'Rotational Speed', 'Pitch Angle Blade 1']
+            pwr_curve_vars_qb   = ['Aerodynamic Power', 'Power Coefficient', 'Thrust Coefficient', 'Rotational Speed', 'Pitch Angle BLD_1']
+        
+        pwr_curv_vars_of    = ["GenPwr", "RtFldCp", "RtFldCt", "RotSpeed", "BldPitch1"]
+        rename_dict = dict(zip(pwr_curve_vars_qb, pwr_curv_vars_of))
+        stats_pwrcrv   = stats_pwrcrv.rename(columns=rename_dict)
+        sum_stats      = sum_stats.rename(columns=rename_dict)
+        if len(U) > 1 and self.qb_vt['Turbine']['CONTROLLERTYPE'] > 0 and self.qb_vt['QSim']['DLCGenerator']:
+            #va gt                                                          
+            # pp = PowerProduction(discrete_inputs['turbine_class'])
+            # AEP, perf_data = pp.AEP(stats_pwrcrv, U, pwr_curv_vars_of)
+
+            if not self.options['modeling_options']['Floris']['flag']:
+                pp = PowerProduction(discrete_inputs['turbine_class'])
+            else:
+                pp = PowerProduction_post(discrete_inputs['turbine_class'], inputs['site_weibull_Vmean'][0], inputs['site_weibull_shape_factor'][0])
+                print('! estimating power production using site wind charactristics !')          
+            
+            if not self.options['modeling_options']['Floris']['flag']:
+                AEP, perf_data = pp.AEP(sum_stats, U, pwr_curv_vars_of)
+            else:
+                AEP, perf_data = pp.AEP_post(sum_stats, U, pwr_curv_vars_of)
+
+            #va gt
+
+            outputs['P_out'] = perf_data['GenPwr']['mean'] * 1.e3
+            outputs['Cp_out'] = perf_data['RtFldCp']['mean']
+            outputs['Ct_out'] = perf_data['RtFldCt']['mean']
+            outputs['Omega_out'] = perf_data['RotSpeed']['mean']
+            outputs['pitch_out'] = perf_data['BldPitch1']['mean']
+            outputs['AEP'] = AEP
+        else:
+            # If DLC 1.1 was run
+            if len(stats_pwrcrv['RtFldCp']['mean']) == 1: 
+                outputs['Cp_out'] = stats_pwrcrv['RtFldCp']['mean']
+                outputs['Ct_out'] = stats_pwrcrv['RtFldCt']['mean']
+                outputs['Omega_out'] = stats_pwrcrv['RotSpeed']['mean']
+                outputs['pitch_out'] = stats_pwrcrv['BldPitch1']['mean']
+                if self.qb_vt['Turbine']['CONTROLLERTYPE'] > 0:
+                    outputs['AEP'] = stats_pwrcrv['GenPwr']['mean']
+                    outputs['P_out'] = stats_pwrcrv['GenPwr']['mean'].iloc[0] * 1.e3
+                logger.warning('WARNING: QBlade is run at a single wind speed. AEP cannot be estimated. Using average power instead.')
+            else:
+                outputs['Cp_out'] = sum_stats['RtFldCp']['mean'].mean()
+                outputs['Ct_out'] = sum_stats['RtFldCt']['mean'].mean()
+                outputs['Omega_out'] = sum_stats['RotSpeed']['mean'].mean()
+                outputs['pitch_out'] = sum_stats['BldPitch1']['mean'].mean()
+                if self.qb_vt['Turbine']['CONTROLLERTYPE'] > 0:
+                    outputs['AEP'] = sum_stats['GenPwr']['mean'].mean()
+                    outputs['P_out'] = sum_stats['GenPwr']['mean'].iloc[0] * 1.e3
+                logger.warning('WARNING: QBlade is not run using DLC AEP, 1.1, or 1.2. AEP cannot be estimated. Using average power instead.')
+        
+        if len(U) > 0:
+            outputs['V_out'] = np.unique(U)
+        elif len(U) == 0 and self.qb_vt['QSim']['DLCGenerator']:
+            outputs['V_out'] = dlc_generator.cases[0].URef
+        else:
+            outputs['V_out'] = sum_stats['X_g Inflow Vel. at Hub']['mean'].mean()
+
+
         return outputs
           	
-    def get_blade_loading(self, inputs, outputs):
+    def get_blade_loading(self, sum_stats, extreme_table, inputs, outputs):
             """
             Find the spanwise loading along the blade span.
 
@@ -2090,21 +2048,18 @@ class QBLADELoadCases(ExplicitComponent):
             extreme_table : dict
             """
 
-            sum_stats = self.cruncher.summary_stats
-            extreme_table = self.cruncher.extremes
-
             # Determine maximum deflection magnitudes
             if self.n_blades == 2:
-                defl_mag = [max(sum_stats['X_c Tip Trl.Def. (OOP) BLD 1']['max']), max(sum_stats['X_c Tip Trl.Def. (OOP) BLD 2']['max'])]
+                defl_mag = [max(sum_stats['X_c Tip Trl.Def. (OOP) BLD_1']['max']), max(sum_stats['X_c Tip Trl.Def. (OOP) BLD_2']['max'])]
             else:
-                defl_mag = [max(sum_stats['X_c Tip Trl.Def. (OOP) BLD 1']['max']), max(sum_stats['X_c Tip Trl.Def. (OOP) BLD 2']['max']), max(sum_stats['X_c Tip Trl.Def. (OOP) BLD 3']['max'])]
+                defl_mag = [max(sum_stats['X_c Tip Trl.Def. (OOP) BLD_1']['max']), max(sum_stats['X_c Tip Trl.Def. (OOP) BLD_2']['max']), max(sum_stats['X_c Tip Trl.Def. (OOP) BLD_3']['max'])]
             # Get the maximum out of plane blade deflection
             outputs["max_TipDxc"] = np.max(defl_mag)
 
             # Return moments around x and y and axial force along blade span at instance of largest flapwise bending moment at each node
-            My_chans = ["Y_b RootBend. Mom. BLD", "Y_l Mom. BLD_ pos 0.100", "Y_l Mom. BLD_ pos 0.200", "Y_l Mom. BLD_ pos 0.300", "Y_l Mom. BLD_ pos 0.400", "Y_l Mom. BLD_ pos 0.500", "Y_l Mom. BLD_ pos 0.600", "Y_l Mom. BLD_ pos 0.700", "Y_l Mom. BLD_ pos 0.800", "Y_l Mom. BLD_ pos 0.900"]
-            Mx_chans = ["X_b RootBend. Mom. BLD", "X_l Mom. BLD_ pos 0.100", "X_l Mom. BLD_ pos 0.200", "X_l Mom. BLD_ pos 0.300", "X_l Mom. BLD_ pos 0.400", "X_l Mom. BLD_ pos 0.500", "X_l Mom. BLD_ pos 0.600", "X_l Mom. BLD_ pos 0.700", "X_l Mom. BLD_ pos 0.800", "X_l Mom. BLD_ pos 0.900"]
-            Fz_chans = ["Z_b Root For. BLD", "Z_l For. BLD_ pos 0.100", "Z_l For. BLD_ pos 0.200", "Z_l For. BLD_ pos 0.300", "Z_l For. BLD_ pos 0.400", "Z_l For. BLD_ pos 0.500", "Z_l For. BLD_ pos 0.600", "Z_l For. BLD_ pos 0.700", "Z_l For. BLD_ pos 0.800", "Z_l For. BLD_ pos 0.900"]
+            My_chans = ["Y_b RootBend. Mom. BLD_", "Y_l Mom. BLD_ pos 0.100", "Y_l Mom. BLD_ pos 0.200", "Y_l Mom. BLD_ pos 0.300", "Y_l Mom. BLD_ pos 0.400", "Y_l Mom. BLD_ pos 0.500", "Y_l Mom. BLD_ pos 0.600", "Y_l Mom. BLD_ pos 0.700", "Y_l Mom. BLD_ pos 0.800", "Y_l Mom. BLD_ pos 0.900"]
+            Mx_chans = ["X_b RootBend. Mom. BLD_", "X_l Mom. BLD_ pos 0.100", "X_l Mom. BLD_ pos 0.200", "X_l Mom. BLD_ pos 0.300", "X_l Mom. BLD_ pos 0.400", "X_l Mom. BLD_ pos 0.500", "X_l Mom. BLD_ pos 0.600", "X_l Mom. BLD_ pos 0.700", "X_l Mom. BLD_ pos 0.800", "X_l Mom. BLD_ pos 0.900"]
+            Fz_chans = ["Z_b Root For. BLD_", "Z_l For. BLD_ pos 0.100", "Z_l For. BLD_ pos 0.200", "Z_l For. BLD_ pos 0.300", "Z_l For. BLD_ pos 0.400", "Z_l For. BLD_ pos 0.500", "Z_l For. BLD_ pos 0.600", "Z_l For. BLD_ pos 0.700", "Z_l For. BLD_ pos 0.800", "Z_l For. BLD_ pos 0.900"]
                 
             Fz = []
             Mx = []
@@ -2171,13 +2126,13 @@ class QBLADELoadCases(ExplicitComponent):
 
             # Determine maximum root moment
             if self.n_blades == 2:
-                blade_root_flap_moment = max([max(sum_stats['Y_b RootBend. Mom. BLD 1']['max']), max(sum_stats['Y_b RootBend. Mom. BLD 2']['max'])])
-                blade_root_oop_moment  = max([max(sum_stats['Y_c RootBend. Mom. (OOP) BLD 1']['max']), max(sum_stats['Y_c RootBend. Mom. (OOP) BLD 2']['max'])])
-                blade_root_tors_moment  = max([max(sum_stats['Z_b RootBend. Mom. BLD 1']['max']), max(sum_stats['Z_b RootBend. Mom. BLD 2']['max'])])
+                blade_root_flap_moment = max([max(sum_stats['Y_b RootBend. Mom. BLD_1']['max']), max(sum_stats['Y_b RootBend. Mom. BLD_2']['max'])])
+                blade_root_oop_moment  = max([max(sum_stats['Y_c RootBend. Mom. (OOP) BLD_1']['max']), max(sum_stats['Y_c RootBend. Mom. (OOP) BLD_2']['max'])])
+                blade_root_tors_moment  = max([max(sum_stats['Z_b RootBend. Mom. BLD_1']['max']), max(sum_stats['Z_b RootBend. Mom. BLD_2']['max'])])
             else:
-                blade_root_flap_moment = max([max(sum_stats['Y_b RootBend. Mom. BLD 1']['max']), max(sum_stats['Y_b RootBend. Mom. BLD 2']['max']), max(sum_stats['Y_b RootBend. Mom. BLD 3']['max'])])
-                blade_root_oop_moment  = max([max(sum_stats['Y_c RootBend. Mom. (OOP) BLD 1']['max']), max(sum_stats['Y_c RootBend. Mom. (OOP) BLD 2']['max']), max(sum_stats['Y_c RootBend. Mom. (OOP) BLD 3']['max'])])
-                blade_root_tors_moment  = max([max(sum_stats['Z_b RootBend. Mom. BLD 1']['max']), max(sum_stats['Z_b RootBend. Mom. BLD 2']['max']), max(sum_stats['Z_b RootBend. Mom. BLD 3']['max'])])
+                blade_root_flap_moment = max([max(sum_stats['Y_b RootBend. Mom. BLD_1']['max']), max(sum_stats['Y_b RootBend. Mom. BLD_2']['max']), max(sum_stats['Y_b RootBend. Mom. BLD_3']['max'])])
+                blade_root_oop_moment  = max([max(sum_stats['Y_c RootBend. Mom. (OOP) BLD_1']['max']), max(sum_stats['Y_c RootBend. Mom. (OOP) BLD_2']['max']), max(sum_stats['Y_c RootBend. Mom. (OOP) BLD_3']['max'])])
+                blade_root_tors_moment  = max([max(sum_stats['Z_b RootBend. Mom. BLD_1']['max']), max(sum_stats['Z_b RootBend. Mom. BLD_2']['max']), max(sum_stats['Z_b RootBend. Mom. BLD_3']['max'])])
             
             outputs['max_RootMyb'] = blade_root_flap_moment
             outputs['max_RootMyc'] = blade_root_oop_moment
@@ -2223,7 +2178,7 @@ class QBLADELoadCases(ExplicitComponent):
 
             return outputs
 
-    def get_tower_loading(self, inputs, outputs):
+    def get_tower_loading(self, sum_stats, extreme_table, inputs, outputs):
         """
         Find the loading along the tower height.
 
@@ -2232,9 +2187,6 @@ class QBLADELoadCases(ExplicitComponent):
         sum_stats : pd.DataFrame
         extreme_table : dict
         """
-        sum_stats = self.cruncher.summary_stats
-        extreme_table = self.cruncher.extremes
-
         tower_chans_Fx = ["X_tb For. TWR Bot. Constr.", "X_l For. TWR pos 0.100", "X_l For. TWR pos 0.200", "X_l For. TWR pos 0.300", "X_l For. TWR pos 0.400", "X_l For. TWR pos 0.500", "X_l For. TWR pos 0.600", "X_l For. TWR pos 0.700", "X_l For. TWR pos 0.800", "X_l For. TWR pos 0.900", "X_tt For. TWR Top Constr."]
         tower_chans_Fy = ["Y_tb For. TWR Bot. Constr.", "Y_l For. TWR pos 0.100", "Y_l For. TWR pos 0.200", "Y_l For. TWR pos 0.300", "Y_l For. TWR pos 0.400", "Y_l For. TWR pos 0.500", "Y_l For. TWR pos 0.600", "Y_l For. TWR pos 0.700", "Y_l For. TWR pos 0.800", "Y_l For. TWR pos 0.900", "Y_tt For. TWR Top Constr."]
         tower_chans_Fz = ["Z_tb For. TWR Bot. Constr.", "Z_l For. TWR pos 0.100", "Z_l For. TWR pos 0.200", "Z_l For. TWR pos 0.300", "Z_l For. TWR pos 0.400", "Z_l For. TWR pos 0.500", "Z_l For. TWR pos 0.600", "Z_l For. TWR pos 0.700", "Z_l For. TWR pos 0.800", "Z_l For. TWR pos 0.900", "Z_tt For. TWR Top Constr."]
@@ -2243,20 +2195,18 @@ class QBLADELoadCases(ExplicitComponent):
         tower_chans_Mz = ["Z_tb Mom. TWR Bot. Constr.", "Z_l Mom. TWR pos 0.100", "Z_l Mom. TWR pos 0.200", "Z_l Mom. TWR pos 0.300", "Z_l Mom. TWR pos 0.400", "Z_l Mom. TWR pos 0.500", "Z_l Mom. TWR pos 0.600", "Z_l Mom. TWR pos 0.700", "Z_l Mom. TWR pos 0.800", "Z_l Mom. TWR pos 0.900", "Z_tt Mom. TWR Top Constr."]
 
         fatb_max_chan   = "Y_tb Mom. TWR Bot. Constr."
-        fatb_max = np.max(sum_stats[fatb_max_chan]['max'])
-        idx      = np.argmax(sum_stats[fatb_max_chan]['max'])
 
         # Get the maximum fore-aft moment at tower base, 
         # We use OF channel naming convention from here on out to be able to use the standard constraint convetnions
-        outputs["max_TwrBsMyt"] = fatb_max
-        outputs["max_TwrBsMyt_ratio"] = fatb_max / self.options['opt_options']['constraints']['control']['Max_TwrBsMyt']['max']
+        outputs["max_TwrBsMyt"] = np.max(sum_stats[fatb_max_chan]['max'])
+        outputs["max_TwrBsMyt_ratio"] = np.max(sum_stats[fatb_max_chan]['max'])/self.options['opt_options']['constraints']['control']['Max_TwrBsMyt']['max']
         # Return forces and moments along tower height at instance of largest fore-aft tower base moment
-        Fx = [extreme_table[fatb_max_chan][idx][var] for var in tower_chans_Fx]
-        Fy = [extreme_table[fatb_max_chan][idx][var] for var in tower_chans_Fy]
-        Fz = [extreme_table[fatb_max_chan][idx][var] for var in tower_chans_Fz]
-        Mx = [extreme_table[fatb_max_chan][idx][var] for var in tower_chans_Mx]
-        My = [extreme_table[fatb_max_chan][idx][var] for var in tower_chans_My]
-        Mz = [extreme_table[fatb_max_chan][idx][var] for var in tower_chans_Mz]
+        Fx = [extreme_table[fatb_max_chan][np.argmax(sum_stats[fatb_max_chan]['max'])][var] for var in tower_chans_Fx]
+        Fy = [extreme_table[fatb_max_chan][np.argmax(sum_stats[fatb_max_chan]['max'])][var] for var in tower_chans_Fy]
+        Fz = [extreme_table[fatb_max_chan][np.argmax(sum_stats[fatb_max_chan]['max'])][var] for var in tower_chans_Fz]
+        Mx = [extreme_table[fatb_max_chan][np.argmax(sum_stats[fatb_max_chan]['max'])][var] for var in tower_chans_Mx]
+        My = [extreme_table[fatb_max_chan][np.argmax(sum_stats[fatb_max_chan]['max'])][var] for var in tower_chans_My]
+        Mz = [extreme_table[fatb_max_chan][np.argmax(sum_stats[fatb_max_chan]['max'])][var] for var in tower_chans_Mz]
 
         # Spline results on tower basic grid
         tower_grid = np.linspace(0,1,11) # we require this spacing for WEIS/QBlade
@@ -2290,9 +2240,6 @@ class QBLADELoadCases(ExplicitComponent):
         extreme_table : dict
         """
 
-        sum_stats = self.cruncher.summary_stats
-        extreme_table = self.cruncher.extremes
-
         monopile_chans_Fx = []
         monopile_chans_Fy = []
         monopile_chans_Fz = []
@@ -2316,14 +2263,13 @@ class QBLADELoadCases(ExplicitComponent):
 
         # # Get the maximum of signal M1N1MKye
         outputs["max_M1N1MKye"] = np.max(sum_stats[max_chan]['max'])
-        idx = np.argmax(sum_stats[max_chan]['max'])
         # # Return forces and moments along monopile at instance of largest fore-aft tower base moment
-        Fx = [extreme_table[max_chan][idx][var] for var in monopile_chans_Fx]
-        Fy = [extreme_table[max_chan][idx][var] for var in monopile_chans_Fy]
-        Fz = [extreme_table[max_chan][idx][var] for var in monopile_chans_Fz]
-        Mx = [extreme_table[max_chan][idx][var] for var in monopile_chans_Mx]
-        My = [extreme_table[max_chan][idx][var] for var in monopile_chans_My]
-        Mz = [extreme_table[max_chan][idx][var] for var in monopile_chans_Mz]
+        Fx = [extreme_table[max_chan][np.argmax(sum_stats[max_chan]['max'])][var] for var in monopile_chans_Fx]
+        Fy = [extreme_table[max_chan][np.argmax(sum_stats[max_chan]['max'])][var] for var in monopile_chans_Fy]
+        Fz = [extreme_table[max_chan][np.argmax(sum_stats[max_chan]['max'])][var] for var in monopile_chans_Fz]
+        Mx = [extreme_table[max_chan][np.argmax(sum_stats[max_chan]['max'])][var] for var in monopile_chans_Mx]
+        My = [extreme_table[max_chan][np.argmax(sum_stats[max_chan]['max'])][var] for var in monopile_chans_My]
+        Mz = [extreme_table[max_chan][np.argmax(sum_stats[max_chan]['max'])][var] for var in monopile_chans_Mz]
 
         # # Spline results on grid of channel locations along the monopile
         spline_Fx      = PchipInterpolator(self.Z_out_QBO_mpl, Fx)
@@ -2347,7 +2293,7 @@ class QBLADELoadCases(ExplicitComponent):
 
         return outputs
     
-    def get_control_measures(self, dlc_generator, inputs, outputs):
+    def get_control_measures(self, sum_stats, chan_time, inputs, outputs):
         '''
         calculate control measures:
             - rotor_overspeed
@@ -2355,56 +2301,51 @@ class QBLADELoadCases(ExplicitComponent):
         given:
             - sum_stats : pd.DataFrame
         '''
-        if dlc_generator is None: 
-            self.TMax = np.full(self.cases, self.qb_vt['QSim']['TMax'], dtype=float)
-            self.TStart = np.full(self.cases, self.qb_vt['QSim']['STOREFROM'], dtype=float)
-
-        nblades = self.qb_vt['Main']['NUMBLD']
-        chanmax = [f'Pitch Vel. BLD {k+1}' for k in range(nblades)]
-        chanmax += ['HSS Rpm','NcIMUTA']   # Note: this order needs to be maintained for the indexing below to work
-        maxes   = self.cruncher.get_load_rankings(chanmax, ['abs'])
 
         # rotor overspeed
-        max_gen_speed = maxes['val'].loc[maxes['channel'] == 'HSS Rpm'].values[0]
-        outputs['rotor_overspeed'] = (max_gen_speed * np.pi/30. / self.qb_vt['DISCON_in']['PC_RefSpd'] ) - 1.0     # Convert to rad/s (like DISCON) and normalize
+        outputs['rotor_overspeed'] = (np.max(sum_stats['HSS Rpm']['max']) * np.pi/30. / self.qb_vt['DISCON_in']['PC_RefSpd'] ) - 1.0
 
         # nacelle accelleration
-        outputs['max_nac_accel'] = maxes['val'].loc[maxes['channel'] == 'NcIMUTA'].values[0]
+        outputs['max_nac_accel'] = sum_stats['NcIMUTA']['max'].max()
 
         # Max pitch rate
-        max_pitch_rates = maxes['val'].to_numpy()[:nblades]
-        outputs['max_pitch_rate_sim'] = max_pitch_rates.max() / np.rad2deg(self.qb_vt['DISCON_in']['PC_MaxRat'])        # normalize by ROSCO pitch rate
+        max_pitch_rates = np.r_[sum_stats['Pitch Vel. BLD_1']['max'],sum_stats['Pitch Vel. BLD_2']['max'],sum_stats['Pitch Vel. BLD_3']['max']]
+        outputs['max_pitch_rate_sim'] = max(max_pitch_rates)  / np.rad2deg(self.qb_vt['DISCON_in']['PC_MaxRat'])        # normalize by ROSCO pitch rate
 
         # pitch travel and duty cycle
         if self.options['modeling_options']['General']['qblade_configuration']['keep_time']: # TODO keep time is a dummy variable in QBlade for now
             tot_time = 0
             tot_travel = 0
             num_dir_changes = 0
-            max_pitch_rates = [0,0,0]
-            for i_ts in range(self.cruncher.noutputs):
-                iout = self.cruncher.outputs[i_ts].copy()
-                iout.trim_data(self.TStart[i_ts], self.TMax[i_ts])
+            for i_ts, ts in enumerate(chan_time):
+                t_span = ts['Time'][-1] - ts['Time'][0]
+                for i_blade in range(self.qb_vt['Main']['NUMBLD']):
+                    # ts[f'dBldPitch{i_blade+1}'] = np.r_[0,np.diff(ts[f'Pitch Angle Blade {i_blade+1}'])] / self.qb_vt['QSim']['TIMESTEP']
+                    ts[f'dBldPitch{i_blade+1}'] = np.r_[0,np.diff(ts[f'Pitch Angle BLD_{i_blade+1}'])] / self.qb_vt['QSim']['TIMESTEP']
 
-                # total time
-                tot_time += iout.elapsed_time
+                    time_ind = ts['Time'] >= ts['Time'][0]
 
-                for i_blade in range(nblades):
+                    # total time
+                    tot_time += t_span
+
                     # total pitch travel (\int |\dot{\frac{d\theta}{dt}| dt)
-                    tot_travel += iout.total_travel(f'Pitch Angle Blade {i_blade+1}')
+                    tot_travel += np.trapz(np.abs(ts[f'dBldPitch{i_blade+1}'])[time_ind], x=ts['Time'][time_ind])
 
                     # number of direction changes on each blade
-                    num_dir_changes += 0.5 * np.sum(np.abs(np.diff(np.sign(iout[f'Pitch Vel. BLD {i_blade+1}']))))
-                
+                    num_dir_changes += np.sum(np.abs(np.diff(np.sign(ts[f'dBldPitch{i_blade+1}'][time_ind])))) / 2
+
             # Normalize by number of blades, total time
-            outputs['avg_pitch_travel'] = tot_travel / nblades / tot_time
-            outputs['pitch_duty_cycle'] = num_dir_changes / nblades / tot_time
-        
+            avg_travel_per_sec = tot_travel / self.qb_vt['Main']['NUMBLD']  / tot_time
+            outputs['avg_pitch_travel'] = avg_travel_per_sec
+
+            dir_change_per_sec = num_dir_changes / self.qb_vt['Main']['NUMBLD']  / tot_time
+            outputs['pitch_duty_cycle'] = dir_change_per_sec
         else:
             logger.warning('openmdao_qblade warning: avg_pitch_travel, and pitch_duty_cycle require keep_time = True')
 
         return outputs
     
-    def get_floating_measures(self, inputs, outputs):
+    def get_floating_measures(self, sum_stats, chan_time, inputs, outputs):
         '''
         calculate floating measures:
             - Std_PtfmPitch (max over all dlcs if constraint, mean otheriwse)
@@ -2414,20 +2355,17 @@ class QBLADELoadCases(ExplicitComponent):
             - sum_stats : pd.DataFrame
         '''
 
-        sum_stats = self.cruncher.summary_stats
-
         if self.options['opt_options']['constraints']['control']['Std_PtfmPitch']['flag']:
             outputs['Std_PtfmPitch'] = np.max(sum_stats['NP Pitch Y_l']['std'])
         else:
-            # Let's just average the standard deviation of PtfmPitch for now
-            # TODO: weight based on WS distribution, or something else
             outputs['Std_PtfmPitch'] = np.mean(sum_stats['NP Pitch Y_l']['std'])
 
         outputs['Max_PtfmPitch']  = np.max(sum_stats['NP Pitch Y_l']['max'])
-        
+        outputs['Mean_PtfmPitch']  = np.max(sum_stats['NP Pitch Y_l']['mean'])
+
         # Max platform offset        
-        for i_ts in range(self.cruncher.noutputs):
-            max_offset_ts = np.sqrt(self.cruncher.outputs[i_ts]['NP Trans. X_g']**2 + self.cruncher.outputs[i_ts]['NP Trans. Y_g']**2).max()
+        for timeseries in chan_time:
+            max_offset_ts = np.sqrt(timeseries['NP Trans. X_g']**2 + timeseries['NP Trans. Y_g']**2).max()
             outputs['Max_Offset'] = np.r_[outputs['Max_Offset'],max_offset_ts].max()
 
         return outputs
@@ -2459,17 +2397,14 @@ class QBLADELoadCases(ExplicitComponent):
         if missing_stations:
             raise ValueError(f"{component} is missing the following required stations: {missing_stations}, please modify the modeling file accordingly")
         
-    def save_iterations(self,discrete_outputs):
-
-        sum_stats = self.cruncher.summary_stats
-        DELs = self.cruncher.dels
+    def save_iterations(self,summ_stats,DELs,discrete_outputs):
 
         # Make iteration directory
         save_dir = os.path.join(self.QBLADE_runDirectory,'iteration_'+str(self.qb_inumber))
         os.makedirs(save_dir, exist_ok=True)
 
         # Save dataframes as pickles
-        sum_stats.to_pickle(os.path.join(save_dir,'summary_stats.p'))
+        summ_stats.to_pickle(os.path.join(save_dir,'summary_stats.p'))
         DELs.to_pickle(os.path.join(save_dir,'DELs.p'))
 
         # Save qb_vt as pickle
@@ -2478,15 +2413,16 @@ class QBLADELoadCases(ExplicitComponent):
 
         discrete_outputs['ts_out_dir'] = save_dir
 
-    def save_timeseries(self):
+    def save_timeseries(self,chan_time):
 
         # Make iteration directory
         save_dir = os.path.join(self.QBLADE_runDirectory,'iteration_'+str(self.qb_inumber),'timeseries')
         os.makedirs(save_dir, exist_ok=True)
 
         # Save each timeseries as a pickled dataframe
-        for i_ts in range(self.cruncher.noutputs):
-            self.cruncher.outputs[i_ts].save(os.path.join(save_dir,f'{self.QBLADE_namingOut}_{i_ts}.p'))
+        for i_ts, timeseries in enumerate(chan_time):
+            output = OpenFASTOutput.from_dict(timeseries, self.QBLADE_namingOut)
+            output.df.to_pickle(os.path.join(save_dir,self.QBLADE_namingOut + '_' + str(i_ts) + '.p'))
         
     def store_turbines(self):
         # For the moment we only store 1 .*sim file per iteration
@@ -2500,3 +2436,127 @@ class QBLADELoadCases(ExplicitComponent):
         writer.QBLADE_namingOut = f"{self.QBLADE_namingOut_stored}_iteration_{self.qb_inumber}"
         writer.store_turbines = True
         writer.execute()
+ ## va gt
+class PowerProduction_post:
+    """Class to generate power production estimates."""
+
+    def __init__(self, turbine_class, weibull_Vmean=None, weibull_k=None, **kwargs):
+        """
+        Creates an instance of `PowerProduction`.
+
+        Parameters
+        ----------
+        turbine_class : int
+        """
+
+        self.turbine_class = turbine_class
+        self.weibull_Vmean=weibull_Vmean
+        self.weibull_k=weibull_k
+
+    def prob_WindDist_post(self, windspeed, disttype="pdf", weibull_Vmean=None, weibull_k=None):
+        """
+        Generates the probability of a windspeed given the cumulative
+        distribution or probability density function of a Weibull distribution
+        per IEC 61400, or for a given average windspeed and shape parameter
+
+        NOTE: This uses the range of wind speeds simulated over, so if the
+        simulated wind speed range is not indicative of operation range, using
+        this cdf to calculate AEP is invalid
+
+        Parameters
+        ----------
+        windspeed : float or list-like
+            wind speed(s) to calculate probability of
+        disttype : str, optional
+            type of probability, currently supports CDF or PDF
+
+        Returns
+        -------
+        p_bin : list
+            list containing probabilities per wind speed bin
+        """
+        # Define parameters
+        if not (weibull_Vmean is None or weibull_k is None):
+            Vavg = weibull_Vmean
+            k = weibull_k
+            c=Vavg/(gamma(1+1/k))
+            print(f'!! shape factor: k = {k:.3f}    mean wind speed: Vavg = {Vavg:.3f} m/s !!')
+        else:
+            if self.turbine_class in [1, "I"]:
+                Vavg = 50 * 0.2
+            elif self.turbine_class in [2, "II"]:
+                Vavg = 42.5 * 0.2
+            elif self.turbine_class in [3, "III"]:
+                Vavg = 37.5 * 0.2
+            
+            k = 2  # Weibull shape parameter
+            c = (2 * Vavg) / np.sqrt(np.pi)  # Weibull scale parameter
+
+        if disttype.lower() == "cdf":
+            # Calculate probability of wind speed based on WeibulCDF
+            wind_prob = 1 - np.exp(-(windspeed / c) ** k)
+
+        elif disttype.lower() == "pdf":
+            # Calculate probability of wind speed based on WeibulPDF
+            wind_prob = (
+                (k / c)
+                * (windspeed / c) ** (k - 1)
+                * np.exp(-(windspeed / c) ** k)
+            )
+
+        else:
+            raise ValueError(
+                f"The {disttype} probability distribution type is invalid"
+            )
+
+        return wind_prob
+
+    def AEP_post(self, stats, windspeeds, pwr_curve_vars):
+        """
+        Calculate AEP for simulation cases
+
+        Parameters:
+        ----------
+        stats : pd.DataFrame
+            DataFrame containing summary statistics of each DLC.
+        windspeeds : list-like
+            List of wind speed values corresponding to each power output in the stats input
+            for a single dataset
+
+        Returns:
+        --------
+        AEP : list
+            List of annual energy productions.
+        """
+
+        assert len(stats) == len(windspeeds)
+
+        pwr = stats.loc[:, ("GenPwr", "mean")].to_frame()
+
+        # Group and average powers by wind speeds
+        pwr["windspeeds"] = windspeeds
+        pwr = pwr.groupby("windspeeds").mean()
+
+        # Wind probability
+        unique = list(np.unique(windspeeds))
+        #va gt
+        wind_prob = self.prob_WindDist_post(unique, disttype="pdf", weibull_Vmean=self.weibull_Vmean, weibull_k=self.weibull_k)
+        #va gt
+
+        # Calculate AEP
+        AEP = np.trapz(pwr.T * wind_prob, unique) * 8760
+
+        perf_data = {"U": unique}
+        for var in pwr_curve_vars:
+            try:
+                perf_array = stats.loc[:, (var, "mean")].to_frame()
+            except KeyError:
+                print(var,"not found. . . continuing")
+                continue
+            perf_array["windspeed"] = windspeeds
+            perf_array = perf_array.groupby("windspeed").mean()
+            perf_data[var] = perf_array[var]
+
+        return AEP, perf_data
+
+#va gt                                                                                              
